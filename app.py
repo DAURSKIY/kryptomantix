@@ -69,6 +69,11 @@ st.markdown("""
         border-color: #10b981;
         box-shadow: 0 0 60px rgba(16, 185, 129, 0.3);
     }
+    .verdict-young {
+        background: linear-gradient(135deg, rgba(236, 72, 153, 0.15), rgba(131, 24, 67, 0.4));
+        border-color: #ec4899;
+        box-shadow: 0 0 60px rgba(236, 72, 153, 0.3);
+    }
     .verdict-established {
         background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(30, 58, 138, 0.4));
         border-color: #3b82f6;
@@ -87,6 +92,7 @@ st.markdown("""
     .verdict-emoji { font-size: 72px; }
     .verdict-title { font-size: 42px; font-weight: 800; margin: 10px 0; letter-spacing: 2px; }
     .verdict-gem .verdict-title { color: #6ee7b7; }
+    .verdict-young .verdict-title { color: #f9a8d4; }
     .verdict-established .verdict-title { color: #93c5fd; }
     .verdict-risk .verdict-title { color: #fcd34d; }
     .verdict-scam .verdict-title { color: #fca5a5; }
@@ -285,7 +291,7 @@ def analyze(pair: dict):
     # Ликвидность в "сладкой зоне"
     if 50000 <= liq <= 5000000:
         gem_points += 2
-        flags.append(("green", f"💎 Ликвидность в оптимальной зоне"))
+        flags.append(("green", "💎 Ликвидность в оптимальной зоне"))
     elif liq > 5000000:
         gem_points -= 1
         flags.append(("yellow", "🏛️ Очень крупная ликвидность — токен устоявшийся"))
@@ -313,6 +319,12 @@ def analyze(pair: dict):
         verdict = "scam"
     elif score < 3:
         verdict = "risk"
+    elif age_days < 7:
+        # Молодой токен — не может быть "устоявшимся"
+        if gem_points >= 5:
+            verdict = "gem"
+        else:
+            verdict = "young"
     elif gem_points >= 5:
         verdict = "gem"
     else:
@@ -361,6 +373,14 @@ if scan and address.strip():
                 <div class="verdict-emoji">💎</div>
                 <div class="verdict-title">ГЕМ</div>
                 <div class="verdict-desc">Молодой, недооценённый, с потенциалом. Но помни: это не гарантия.</div>
+            </div>
+            """, unsafe_allow_html=True)
+        elif verdict == "young":
+            st.markdown("""
+            <div class="verdict-card verdict-young">
+                <div class="verdict-emoji">🌱</div>
+                <div class="verdict-title">МОЛОДОЙ</div>
+                <div class="verdict-desc">Токену меньше 7 дней. Потенциал есть, но и риск высокий. Не гем и не скам.</div>
             </div>
             """, unsafe_allow_html=True)
         elif verdict == "established":
