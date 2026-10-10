@@ -69,6 +69,11 @@ st.markdown("""
         border-color: #10b981;
         box-shadow: 0 0 60px rgba(16, 185, 129, 0.3);
     }
+    .verdict-established {
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(30, 58, 138, 0.4));
+        border-color: #3b82f6;
+        box-shadow: 0 0 60px rgba(59, 130, 246, 0.3);
+    }
     .verdict-risk {
         background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(120, 53, 15, 0.4));
         border-color: #f59e0b;
@@ -82,6 +87,7 @@ st.markdown("""
     .verdict-emoji { font-size: 72px; }
     .verdict-title { font-size: 42px; font-weight: 800; margin: 10px 0; letter-spacing: 2px; }
     .verdict-gem .verdict-title { color: #6ee7b7; }
+    .verdict-established .verdict-title { color: #93c5fd; }
     .verdict-risk .verdict-title { color: #fcd34d; }
     .verdict-scam .verdict-title { color: #fca5a5; }
     .verdict-desc { color: #e5e7eb; font-size: 16px; opacity: 0.9; }
@@ -176,6 +182,7 @@ def fetch_token_data(address: str):
 def analyze(pair: dict):
     flags = []
     score = 0
+    gem_points = 0
 
     liq = pair.get("liquidity", {}).get("usd", 0) or 0
     vol24 = pair.get("volume", {}).get("h24", 0) or 0
@@ -190,6 +197,7 @@ def analyze(pair: dict):
     if created:
         age_days = (datetime.now().timestamp() * 1000 - created) / 1000 / 3600 / 24
 
+    # ---------- БЕЗОПАСНОСТЬ ----------
     # 1. Ликвидность
     if liq < 5000:
         flags.append(("red", f"🔴 Критически низкая ликвидность: ${liq:,.0f}"))
@@ -204,7 +212,7 @@ def analyze(pair: dict):
     # 2. Возраст
     if created:
         if age_days < 0.25:
-            flags.append(("red", f"🔴 Токену меньше 6 часов. Высокий риск рага."))
+            flags.append(("red", "🔴 Токену меньше 6 часов. Высокий риск рага."))
             score -= 3
         elif age_days < 1:
             flags.append(("yellow", f"🟡 Токену меньше суток ({age_days*24:.1f} ч)."))
@@ -220,19 +228,18 @@ def analyze(pair: dict):
     if liq > 0:
         ratio = vol24 / liq
         if ratio > 50:
-            flags.append(("red", f"🔴 Аномальный объём: vol/liq = {ratio:.1f}x. Возможна накрутка."))
+            flags.append(("red", f"🔴 Аномальный объём: vol/liq = {ratio:.1f}x. Накрутка."))
             score -= 2
         elif ratio < 0.05:
-            flags.append(("yellow", f"🟡 Очень низкий объём: vol/liq = {ratio:.2f}x. Токен мёртв."))
+            flags.append(("yellow", f"🟡 Очень низкий объём: vol/liq = {ratio:.2f}x. Мёртвый токен."))
             score -= 1
         else:
             flags.append(("green", f"🟢 Здоровый объём: vol/liq = {ratio:.2f}x"))
             score += 1
 
-    # 4. FDV / ликвидность (с учётом возраста)
+    # 4. FDV / ликвидность
     if liq > 0 and fdv > 0:
         fdv_liq = fdv / liq
-        # Для старых токенов порог выше, для новых — ниже
         red_threshold = 5000 if age_days > 30 else 2000
         yellow_threshold = 1000 if age_days > 30 else 500
 
@@ -240,7 +247,7 @@ def analyze(pair: dict):
             flags.append(("red", f"🔴 FDV в {fdv_liq:.0f}x больше ликвидности. Критично."))
             score -= 2
         elif fdv_liq > yellow_threshold:
-            flags.append(("yellow", f"🟡 FDV в {fdv_liq:.0f}x больше ликвидности. Норма для мемкоинов."))
+            flags.append(("yellow", f"🟡 FDV в {fdv_liq:.0f}x больше ликвидности."))
         else:
             flags.append(("green", f"🟢 FDV/ликвидность в норме: {fdv_liq:.0f}x"))
             score += 1
@@ -250,10 +257,10 @@ def analyze(pair: dict):
     if total_tx > 0:
         buy_ratio = buys / total_tx
         if buy_ratio < 0.3:
-            flags.append(("red", f"🔴 Давление продаж: {sells} продаж против {buys} покупок"))
+            flags.append(("red", f"🔴 Давление продаж: {sells} продаж vs {buys} покупок"))
             score -= 2
         elif buy_ratio > 0.7:
-            flags.append(("green", f"🟢 Активные покупки: {buys} против {sells}"))
+            flags.append(("green", f"🟢 Активные покупки: {buys} vs {sells}"))
             score += 1
 
     # 6. Падение цены
@@ -264,15 +271,54 @@ def analyze(pair: dict):
         flags.append(("yellow", f"🟡 Сильное падение: {price_change:.1f}%"))
         score -= 1
 
-    # Вердикт
-    if score >= 4:
-        verdict = "gem"
-    elif score >= 0:
-        verdict = "risk"
-    else:
-        verdict = "scam"
+    # ---------- ПОТЕНЦИАЛ ГЕМА ----------
+    # Молодой, но не новорождённый
+    if 7 <= age_days <= 90:
+        gem_points += 2
+        flags.append(("green", f"💎 Молодой токен ({age_days:.0f} дней) — потенциал роста"))
+    elif 3 <= age_days < 7:
+        gem_points += 1
+    elif age_days > 180:
+        gem_points -= 2
+        flags.append(("yellow", "🏛️ Токен старше 6 месяцев — уже не гем"))
 
-    return verdict, flags, {
+    # Ликвидность в "сладкой зоне"
+    if 50000 <= liq <= 5000000:
+        gem_points += 2
+        flags.append(("green", f"💎 Ликвидность в оптимальной зоне"))
+    elif liq > 5000000:
+        gem_points -= 1
+        flags.append(("yellow", "🏛️ Очень крупная ликвидность — токен устоявшийся"))
+
+    # Активная торговля
+    if liq > 0:
+        ratio = vol24 / liq
+        if 0.3 <= ratio <= 5:
+            gem_points += 2
+            flags.append(("green", "💎 Активная здоровая торговля"))
+
+    # Растёт, но не памп
+    if 5 <= price_change <= 200:
+        gem_points += 1
+    elif price_change > 500:
+        gem_points -= 1
+        flags.append(("yellow", f"🟡 Уже памп +{price_change:.0f}% — поздно входить"))
+
+    # Покупок больше
+    if total_tx > 0 and buys > sells * 1.2:
+        gem_points += 1
+
+    # ---------- ВЕРДИКТ ----------
+    if score < 0:
+        verdict = "scam"
+    elif score < 3:
+        verdict = "risk"
+    elif gem_points >= 5:
+        verdict = "gem"
+    else:
+        verdict = "established"
+
+    return verdict, flags, gem_points, {
         "Ликвидность": f"${liq:,.0f}",
         "Объём 24ч": f"${vol24:,.0f}",
         "FDV": f"${fdv:,.0f}",
@@ -307,14 +353,22 @@ if scan and address.strip():
             reverse=True
         )
         pair = pairs[0]
-        verdict, flags, metrics = analyze(pair)
+        verdict, flags, gem_points, metrics = analyze(pair)
 
         if verdict == "gem":
             st.markdown("""
             <div class="verdict-card verdict-gem">
                 <div class="verdict-emoji">💎</div>
                 <div class="verdict-title">ГЕМ</div>
-                <div class="verdict-desc">Низкий риск по on-chain метрикам. Но помни: это не гарантия.</div>
+                <div class="verdict-desc">Молодой, недооценённый, с потенциалом. Но помни: это не гарантия.</div>
+            </div>
+            """, unsafe_allow_html=True)
+        elif verdict == "established":
+            st.markdown("""
+            <div class="verdict-card verdict-established">
+                <div class="verdict-emoji">🏛️</div>
+                <div class="verdict-title">УСТОЯВШИЙСЯ</div>
+                <div class="verdict-desc">Известный токен. Безопасен, но уже не гем — потенциал роста ниже.</div>
             </div>
             """, unsafe_allow_html=True)
         elif verdict == "risk":
