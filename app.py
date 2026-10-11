@@ -9,6 +9,64 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# ---------- СЕКРЕТЫ YANDEXGPT ----------
+# На локале: создай .streamlit/secrets.toml с ключами
+# На Streamlit Cloud: добавь в Settings → Secrets
+try:
+    YANDEX_API_KEY = st.secrets["YANDEX_API_KEY"]
+    YANDEX_FOLDER_ID = st.secrets["YANDEX_FOLDER_ID"]
+except Exception:
+    YANDEX_API_KEY = ""
+    YANDEX_FOLDER_ID = ""
+
+
+def get_ai_verdict(metrics: dict) -> str:
+    """Отправляет метрики в YandexGPT и получает текстовое объяснение."""
+    if not YANDEX_API_KEY or not YANDEX_FOLDER_ID:
+        return "⚠️ AI-анализ не настроен. Добавь ключи YandexGPT в Secrets."
+
+    prompt_text = f"""Ты — AI-аналитик криптовалют. Проанализируй метрики токена и напиши краткий вердикт на русском языке (2-3 предложения). Будь объективен, укажи основные риски или потенциал. Без воды, без «я не финансовый советник». Просто оценка.
+
+Метрики токена:
+— Сеть: {metrics.get('Сеть', 'N/A')}
+— Пара: {metrics.get('Пара', 'N/A')}
+— Ликвидность: {metrics.get('Ликвидность', 'N/A')}
+— Объём 24ч: {metrics.get('Объём 24ч', 'N/A')}
+— FDV: {metrics.get('FDV', 'N/A')}
+— Цена: {metrics.get('Цена', 'N/A')}
+— Изменение 24ч: {metrics.get('Δ 24ч', 'N/A')}
+— Покупки: {metrics.get('Покупки', 'N/A')} / Продажи: {metrics.get('Продажи', 'N/A')}
+— Вердикт сканера: {metrics.get('Вердикт', 'N/A')}
+
+Твой вердикт (2-3 предложения):"""
+
+    url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Api-Key {YANDEX_API_KEY}"
+    }
+    body = {
+        "modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt-lite",
+        "completionOptions": {
+            "stream": False,
+            "temperature": 0.3,
+            "maxTokens": "500"
+        },
+        "messages": [
+            {"role": "system", "text": "Ты — опытный криптоаналитик. Отвечай кратко, по делу, на русском языке."},
+            {"role": "user", "text": prompt_text}
+        ]
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=body, timeout=30)
+        response.raise_for_status()
+        result = response.json()
+        return result["result"]["alternatives"][0]["message"]["text"]
+    except Exception as e:
+        return f"⚠️ Ошибка AI-анализа: {str(e)[:200]}"
+
+
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
@@ -127,6 +185,24 @@ st.markdown("""
     .flag-yellow { border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.08); }
     .flag-green { border-left-color: #10b981; background: rgba(16, 185, 129, 0.08); }
 
+    .ai-block {
+        background: linear-gradient(135deg, rgba(168, 85, 247, 0.1), rgba(236, 72, 153, 0.1));
+        border: 1px solid rgba(168, 85, 247, 0.4);
+        border-radius: 16px;
+        padding: 24px;
+        margin: 20px 0;
+        color: #e5e7eb;
+        font-size: 16px;
+        line-height: 1.6;
+    }
+    .ai-header {
+        color: #d8b4fe;
+        font-size: 18px;
+        font-weight: 700;
+        margin-bottom: 12px;
+        letter-spacing: 1px;
+    }
+
     .disclaimer {
         text-align: center;
         color: #6b7280;
@@ -174,6 +250,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+
 # ---------- ФУНКЦИИ ----------
 @st.cache_data(ttl=60)
 def fetch_token_data(address: str):
@@ -184,6 +261,7 @@ def fetch_token_data(address: str):
         return r.json()
     except Exception as e:
         return {"error": str(e)}
+
 
 def analyze(pair: dict):
     flags = []
@@ -204,7 +282,6 @@ def analyze(pair: dict):
         age_days = (datetime.now().timestamp() * 1000 - created) / 1000 / 3600 / 24
 
     # ---------- БЕЗОПАСНОСТЬ ----------
-    # 1. Ликвидность
     if liq < 5000:
         flags.append(("red", f"🔴 Критически низкая ликвидность: ${liq:,.0f}"))
         score -= 3
@@ -215,7 +292,6 @@ def analyze(pair: dict):
         flags.append(("green", f"🟢 Достаточная ликвидность: ${liq:,.0f}"))
         score += 2
 
-    # 2. Возраст
     if created:
         if age_days < 0.25:
             flags.append(("red", "🔴 Токену меньше 6 часов. Высокий риск рага."))
@@ -230,7 +306,6 @@ def analyze(pair: dict):
         flags.append(("yellow", "🟡 Нет данных о дате создания пары"))
         score -= 1
 
-    # 3. Объём/ликвидность
     if liq > 0:
         ratio = vol24 / liq
         if ratio > 50:
@@ -243,7 +318,6 @@ def analyze(pair: dict):
             flags.append(("green", f"🟢 Здоровый объём: vol/liq = {ratio:.2f}x"))
             score += 1
 
-    # 4. FDV / ликвидность
     if liq > 0 and fdv > 0:
         fdv_liq = fdv / liq
         red_threshold = 5000 if age_days > 30 else 2000
@@ -258,7 +332,6 @@ def analyze(pair: dict):
             flags.append(("green", f"🟢 FDV/ликвидность в норме: {fdv_liq:.0f}x"))
             score += 1
 
-    # 5. Покупки/продажи
     total_tx = buys + sells
     if total_tx > 0:
         buy_ratio = buys / total_tx
@@ -269,7 +342,6 @@ def analyze(pair: dict):
             flags.append(("green", f"🟢 Активные покупки: {buys} vs {sells}"))
             score += 1
 
-    # 6. Падение цены
     if price_change < -70:
         flags.append(("red", f"🔴 Обвал за 24ч: {price_change:.1f}%"))
         score -= 3
@@ -278,7 +350,6 @@ def analyze(pair: dict):
         score -= 1
 
     # ---------- ПОТЕНЦИАЛ ГЕМА ----------
-    # Молодой, но не новорождённый
     if 7 <= age_days <= 90:
         gem_points += 2
         flags.append(("green", f"💎 Молодой токен ({age_days:.0f} дней) — потенциал роста"))
@@ -288,7 +359,6 @@ def analyze(pair: dict):
         gem_points -= 2
         flags.append(("yellow", "🏛️ Токен старше 6 месяцев — уже не гем"))
 
-    # Ликвидность в "сладкой зоне"
     if 50000 <= liq <= 5000000:
         gem_points += 2
         flags.append(("green", "💎 Ликвидность в оптимальной зоне"))
@@ -296,21 +366,18 @@ def analyze(pair: dict):
         gem_points -= 1
         flags.append(("yellow", "🏛️ Очень крупная ликвидность — токен устоявшийся"))
 
-    # Активная торговля
     if liq > 0:
         ratio = vol24 / liq
         if 0.3 <= ratio <= 5:
             gem_points += 2
             flags.append(("green", "💎 Активная здоровая торговля"))
 
-    # Растёт, но не памп
     if 5 <= price_change <= 200:
         gem_points += 1
     elif price_change > 500:
         gem_points -= 1
         flags.append(("yellow", f"🟡 Уже памп +{price_change:.0f}% — поздно входить"))
 
-    # Покупок больше
     if total_tx > 0 and buys > sells * 1.2:
         gem_points += 1
 
@@ -320,7 +387,6 @@ def analyze(pair: dict):
     elif score < 3:
         verdict = "risk"
     elif age_days < 7:
-        # Молодой токен — не может быть "устоявшимся"
         if gem_points >= 5:
             verdict = "gem"
         else:
@@ -330,7 +396,7 @@ def analyze(pair: dict):
     else:
         verdict = "established"
 
-    return verdict, flags, gem_points, {
+    metrics = {
         "Ликвидность": f"${liq:,.0f}",
         "Объём 24ч": f"${vol24:,.0f}",
         "FDV": f"${fdv:,.0f}",
@@ -341,7 +407,11 @@ def analyze(pair: dict):
         "DEX": str(pair.get("dexId", "—")).upper(),
         "Пара": f"{pair.get('baseToken', {}).get('symbol', '?')}/{pair.get('quoteToken', {}).get('symbol', '?')}",
         "Сеть": str(pair.get("chainId", "—")).upper(),
+        "Вердикт": verdict,
     }
+
+    return verdict, flags, gem_points, metrics
+
 
 # ---------- UI ----------
 address = st.text_input("", placeholder="📍 Вставь адрес контракта (Solana, Base, Ethereum, BSC...)", label_visibility="collapsed")
@@ -423,6 +493,17 @@ if scan and address.strip():
         st.markdown("### 🚩 Анализ Криптомантикса")
         for level, text in flags:
             st.markdown(f'<div class="flag-item flag-{level}">{text}</div>', unsafe_allow_html=True)
+
+        # ---------- AI-АНАЛИЗ ----------
+        st.markdown("### 🤖 AI-анализ")
+        with st.spinner("🤖 YandexGPT изучает данные..."):
+            ai_verdict = get_ai_verdict(metrics)
+        st.markdown(f"""
+        <div class="ai-block">
+            <div class="ai-header">🔮 ВЕРДИКТ AI-ОРАКУЛА</div>
+            {ai_verdict}
+        </div>
+        """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="disclaimer">
