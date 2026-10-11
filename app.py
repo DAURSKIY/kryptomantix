@@ -59,7 +59,7 @@ def get_ai_verdict(metrics: dict) -> str:
     }
 
     try:
-        response = requests.post(url, headers=headers, json=body, timeout=30)
+        response = requests.post(url, headers=headers, json=body, timeout=60)
         response.raise_for_status()
         result = response.json()
         return result["result"]["alternatives"][0]["message"]["text"]
