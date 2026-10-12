@@ -178,7 +178,11 @@ def check_contract(address: str, chain: str) -> dict:
         data = r.json()
 
         if data.get("code") != 1 or not data.get("result"):
-            return {"error": f"GoPlus: {data.get('message', 'no data')}"}
+                       chain_name = chain.upper()
+            msg = data.get('message', 'no data')
+            if 'system error' in msg.lower():
+                return {"error": f"⚠️ Проверка контракта для {chain_name} временно недоступна. Попробуй позже."}
+            return {"error": f"GoPlus: {msg}"}
 
         result = data["result"]
         token_data = None
