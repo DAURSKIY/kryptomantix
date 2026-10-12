@@ -155,8 +155,7 @@ def get_goplus_access_token(app_key: str, app_secret: str) -> str:
         data = response.json()
         if data.get("code") == 1:
             return data.get("result", {}).get("access_token", "")
-        else:
-            return ""
+        return ""
     except Exception:
         return ""
 
@@ -178,10 +177,9 @@ def check_contract(address: str, chain: str) -> dict:
         data = r.json()
 
         if data.get("code") != 1 or not data.get("result"):
-                       chain_name = chain.upper()
-            msg = data.get('message', 'no data')
-            if 'system error' in msg.lower():
-                return {"error": f"⚠️ Проверка контракта для {chain_name} временно недоступна. Попробуй позже."}
+            msg = data.get("message", "no data")
+            if "system error" in msg.lower():
+                return {"error": f"⚠️ Проверка контракта для {chain.upper()} временно недоступна. Попробуй позже."}
             return {"error": f"GoPlus: {msg}"}
 
         result = data["result"]
@@ -205,7 +203,6 @@ def check_contract(address: str, chain: str) -> dict:
         sell_tax = float(token_data.get("sell_tax", "0") or "0")
         holder_count = token_data.get("holder_count", "0")
 
-        # ОПАСНЫЕ: honeypot, hidden_owner, can_take_back
         dangers = []
         if is_honeypot:
             dangers.append("honeypot")
@@ -214,7 +211,6 @@ def check_contract(address: str, chain: str) -> dict:
         if can_take_back:
             dangers.append("take_back_ownership")
 
-        # ПРЕДУПРЕЖДЕНИЯ: mint, proxy, blacklist, налоги
         warnings = []
         if is_mintable:
             warnings.append("mint")
@@ -620,7 +616,6 @@ if scan and address.strip():
         pair = pairs[0]
         verdict, flags, gem_points, metrics = analyze(pair)
 
-        # 1. КАРТОЧКА ВЕРДИКТА
         if verdict == "gem":
             st.markdown("""
             <div class="verdict-card verdict-gem">
@@ -662,7 +657,6 @@ if scan and address.strip():
             </div>
             """, unsafe_allow_html=True)
 
-        # 2. МЕТРИКИ
         st.markdown("### 📊 Метрики")
         cols = st.columns(5)
         items = list(metrics.items())[:10]
@@ -675,12 +669,10 @@ if scan and address.strip():
                 </div>
                 """, unsafe_allow_html=True)
 
-        # 3. ФЛАГИ СКАНЕРА
         st.markdown("### 🚩 Анализ Криптомантикса")
         for level, text in flags:
             st.markdown(f'<div class="flag-item flag-{level}">{text}</div>', unsafe_allow_html=True)
 
-        # 4. ПРОВЕРКА КОНТРАКТА (до AI, чтобы AI учёл результат)
         st.markdown("### 🛡️ Проверка контракта")
         with st.spinner("🛡️ GoPlus проверяет контракт..."):
             contract = check_contract(address.strip(), metrics.get("Сеть", ""))
@@ -718,7 +710,6 @@ if scan and address.strip():
                 st.markdown(f'<div class="flag-item flag-{"yellow" if contract["is_proxy"] else "green"}">{"🟡" if contract["is_proxy"] else "🟢"} Proxy: {"Да" if contract["is_proxy"] else "Нет"}</div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="flag-item flag-{"yellow" if contract["buy_tax"] > 0.1 or contract["sell_tax"] > 0.1 else "green"}">{"🟡" if contract["buy_tax"] > 0.1 or contract["sell_tax"] > 0.1 else "🟢"} Налоги: {contract["buy_tax"]*100:.1f}% / {contract["sell_tax"]*100:.1f}%</div>', unsafe_allow_html=True)
 
-        # 5. AI-АНАЛИЗ (с учётом контракта)
         st.markdown("### 🤖 AI-анализ")
         with st.spinner("🤖 YandexGPT изучает данные..."):
             ai_verdict = get_ai_verdict(metrics, flags, contract)
