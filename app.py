@@ -28,8 +28,8 @@ except Exception:
 
 
 # ---------- YANDEXGPT ----------
-def get_ai_verdict(metrics: dict, flags: list) -> str:
-    """Отправляет метрики и флаги в YandexGPT."""
+def get_ai_verdict(metrics: dict, flags: list, contract: dict = None) -> str:
+    """Отправляет метрики, флаги и данные контракта в YandexGPT."""
     if not YANDEX_API_KEY or not YANDEX_FOLDER_ID:
         return "⚠️ AI-анализ не настроен. Добавь ключи YandexGPT в Secrets."
 
@@ -43,6 +43,23 @@ def get_ai_verdict(metrics: dict, flags: list) -> str:
     verdict_ru = verdict_map.get(metrics.get("Вердикт", ""), "не определён")
 
     flags_text = "\n".join([f"— {text}" for level, text in flags])
+
+    contract_text = ""
+    if contract and "error" not in contract:
+        c_v = contract.get("verdict", "")
+        c_map = {"safe": "безопасный", "warning": "есть риски", "danger": "ОПАСНЫЙ"}
+        contract_text = f"""
+ПРОВЕРКА КОНТРАКТА (GoPlus):
+Вердикт: {c_map.get(c_v, c_v)}
+Honeypot: {"Да" if contract.get("is_honeypot") else "Нет"}
+Mint: {"Есть — можно печатать токены" if contract.get("is_mintable") else "Отключён"}
+Blacklist: {"Есть" if contract.get("is_blacklisted") else "Нет"}
+Open source: {"Да" if contract.get("is_open_source") else "Нет"}
+Proxy: {"Да" if contract.get("is_proxy") else "Нет"}
+Скрытый владелец: {"Да" if contract.get("hidden_owner") else "Нет"}
+Может вернуть ownership: {"Да" if contract.get("can_take_back") else "Нет"}
+Налоги: покупка {contract.get("buy_tax", 0)*100:.1f}%, продажа {contract.get("sell_tax", 0)*100:.1f}%
+"""
 
     prompt_text = f"""Ты — AI-аналитик мемкоинов. Проанализируй готовый отчёт сканера и напиши краткий вердикт на русском языке.
 
@@ -58,18 +75,20 @@ FDV: {metrics.get('FDV', 'N/A')}
 
 АНАЛИЗ СКАНЕРА (что именно обнаружено):
 {flags_text}
+{contract_text}
 
 ПРАВИЛА:
 1. Пиши ТОЛЬКО на русском языке.
-2. Опирайся ТОЛЬКО на строки из «Анализ сканера» выше. Не выдумывай.
+2. Опирайся ТОЛЬКО на строки из «Анализ сканера» и «Проверка контракта» выше. Не выдумывай.
 3. Если в анализе написано «Достаточная ликвидность» — НЕ пиши про низкую ликвидность.
 4. Если в анализе написано «Здоровый объём» — НЕ пиши про низкий объём.
 5. Обязательно упомяни главные КРАСНЫЕ флаги. Если их нет — упомяни ЖЁЛТЫЕ.
-6. Если вердикт «СКАМ» или «РИСК» — прямо предупреди: «не входи», «высокий риск рага».
-7. Если вердикт «ГЕМ» — укажи потенциал и напомни о рисках.
-8. Если вердикт «УСТОЯВШИЙСЯ» — скажи, что безопасный, но без роста.
-9. Никаких общих фраз про волатильность криптовалют.
-10. Пиши 2-3 предложения. Без вступлений вроде «Данный токен представляет собой».
+6. Если проверка контракта показала «ОПАСНЫЙ» — упомяни это прямо.
+7. Если вердикт «СКАМ» или «РИСК» — прямо предупреди: «не входи», «высокий риск рага».
+8. Если вердикт «ГЕМ» — укажи потенциал и напомни о рисках.
+9. Если вердикт «УСТОЯВШИЙСЯ» — скажи, что безопасный, но без роста.
+10. Никаких общих фраз про волатильность криптовалют.
+11. Пиши 2-3 предложения. Без вступлений вроде «Данный токен представляет собой».
 
 Твой вердикт:"""
 
@@ -113,7 +132,7 @@ CHAIN_MAP = {
 }
 
 
-@st.cache_data(ttl=3300)  # кэшируем токен на 55 минут (токен живёт 1 час)
+@st.cache_data(ttl=3300)
 def get_goplus_access_token(app_key: str, app_secret: str) -> str:
     """Получает access_token для GoPlus API."""
     if not app_key or not app_secret:
@@ -149,7 +168,6 @@ def check_contract(address: str, chain: str) -> dict:
 
     headers = {"Accept": "application/json"}
 
-    # Пробуем получить access_token
     access_token = get_goplus_access_token(GOPLUS_APP_KEY, GOPLUS_APP_SECRET)
     if access_token:
         headers["Authorization"] = f"Bearer {access_token}"
@@ -183,21 +201,23 @@ def check_contract(address: str, chain: str) -> dict:
         sell_tax = float(token_data.get("sell_tax", "0") or "0")
         holder_count = token_data.get("holder_count", "0")
 
+        # ОПАСНЫЕ: honeypot, hidden_owner, can_take_back
         dangers = []
         if is_honeypot:
             dangers.append("honeypot")
-        if is_blacklisted:
-            dangers.append("blacklist")
         if hidden_owner:
             dangers.append("hidden_owner")
+        if can_take_back:
+            dangers.append("take_back_ownership")
 
+        # ПРЕДУПРЕЖДЕНИЯ: mint, proxy, blacklist, налоги
         warnings = []
         if is_mintable:
             warnings.append("mint")
         if is_proxy:
             warnings.append("proxy")
-        if can_take_back:
-            warnings.append("take_back_ownership")
+        if is_blacklisted:
+            warnings.append("blacklist")
         if buy_tax > 0.1 or sell_tax > 0.1:
             warnings.append("high_tax")
 
@@ -596,6 +616,7 @@ if scan and address.strip():
         pair = pairs[0]
         verdict, flags, gem_points, metrics = analyze(pair)
 
+        # 1. КАРТОЧКА ВЕРДИКТА
         if verdict == "gem":
             st.markdown("""
             <div class="verdict-card verdict-gem">
@@ -637,6 +658,7 @@ if scan and address.strip():
             </div>
             """, unsafe_allow_html=True)
 
+        # 2. МЕТРИКИ
         st.markdown("### 📊 Метрики")
         cols = st.columns(5)
         items = list(metrics.items())[:10]
@@ -649,22 +671,12 @@ if scan and address.strip():
                 </div>
                 """, unsafe_allow_html=True)
 
+        # 3. ФЛАГИ СКАНЕРА
         st.markdown("### 🚩 Анализ Криптомантикса")
         for level, text in flags:
             st.markdown(f'<div class="flag-item flag-{level}">{text}</div>', unsafe_allow_html=True)
 
-        # AI-АНАЛИЗ
-        st.markdown("### 🤖 AI-анализ")
-        with st.spinner("🤖 YandexGPT изучает данные..."):
-            ai_verdict = get_ai_verdict(metrics, flags)
-        st.markdown(f"""
-        <div class="ai-block">
-            <div class="ai-header">🔮 ВЕРДИКТ AI-ОРАКУЛА</div>
-            {ai_verdict}
-        </div>
-        """, unsafe_allow_html=True)
-
-        # ПРОВЕРКА КОНТРАКТА
+        # 4. ПРОВЕРКА КОНТРАКТА (до AI, чтобы AI учёл результат)
         st.markdown("### 🛡️ Проверка контракта")
         with st.spinner("🛡️ GoPlus проверяет контракт..."):
             contract = check_contract(address.strip(), metrics.get("Сеть", ""))
@@ -696,11 +708,22 @@ if scan and address.strip():
             with col1:
                 st.markdown(f'<div class="flag-item flag-{"red" if contract["is_honeypot"] else "green"}">{"🔴" if contract["is_honeypot"] else "🟢"} Honeypot: {"Да" if contract["is_honeypot"] else "Нет"}</div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="flag-item flag-{"yellow" if contract["is_mintable"] else "green"}">{"🟡" if contract["is_mintable"] else "🟢"} Mint: {"Есть — можно печатать токены" if contract["is_mintable"] else "Отключён"}</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="flag-item flag-{"red" if contract["is_blacklisted"] else "green"}">{"🔴" if contract["is_blacklisted"] else "🟢"} Blacklist: {"Есть" if contract["is_blacklisted"] else "Нет"}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="flag-item flag-{"yellow" if contract["is_blacklisted"] else "green"}">{"🟡" if contract["is_blacklisted"] else "🟢"} Blacklist: {"Есть" if contract["is_blacklisted"] else "Нет"}</div>', unsafe_allow_html=True)
             with col2:
                 st.markdown(f'<div class="flag-item flag-{"green" if contract["is_open_source"] else "yellow"}">{"🟢" if contract["is_open_source"] else "🟡"} Open source: {"Да" if contract["is_open_source"] else "Нет"}</div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="flag-item flag-{"yellow" if contract["is_proxy"] else "green"}">{"🟡" if contract["is_proxy"] else "🟢"} Proxy: {"Да" if contract["is_proxy"] else "Нет"}</div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="flag-item flag-{"yellow" if contract["buy_tax"] > 0.1 or contract["sell_tax"] > 0.1 else "green"}">{"🟡" if contract["buy_tax"] > 0.1 or contract["sell_tax"] > 0.1 else "🟢"} Налоги: {contract["buy_tax"]*100:.1f}% / {contract["sell_tax"]*100:.1f}%</div>', unsafe_allow_html=True)
+
+        # 5. AI-АНАЛИЗ (с учётом контракта)
+        st.markdown("### 🤖 AI-анализ")
+        with st.spinner("🤖 YandexGPT изучает данные..."):
+            ai_verdict = get_ai_verdict(metrics, flags, contract)
+        st.markdown(f"""
+        <div class="ai-block">
+            <div class="ai-header">🔮 ВЕРДИКТ AI-ОРАКУЛА</div>
+            {ai_verdict}
+        </div>
+        """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="disclaimer">
