@@ -1,5 +1,7 @@
 import streamlit as st
 import requests
+import hashlib
+import time
 from datetime import datetime
 
 st.set_page_config(
@@ -111,14 +113,46 @@ CHAIN_MAP = {
 }
 
 
+@st.cache_data(ttl=3300)  # кэшируем токен на 55 минут (токен живёт 1 час)
+def get_goplus_access_token(app_key: str, app_secret: str) -> str:
+    """Получает access_token для GoPlus API."""
+    if not app_key or not app_secret:
+        return ""
+
+    timestamp = str(int(time.time()))
+    sign_str = app_key + timestamp + app_secret
+    signature = hashlib.sha1(sign_str.encode('utf-8')).hexdigest()
+
+    payload = {
+        "app_key": app_key,
+        "sign": signature,
+        "timestamp": int(timestamp)
+    }
+
+    url = "https://api.gopluslabs.io/api/v1/token"
+    try:
+        response = requests.post(url, json=payload, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        if data.get("code") == 1:
+            return data.get("result", {}).get("access_token", "")
+        else:
+            return ""
+    except Exception:
+        return ""
+
+
 def check_contract(address: str, chain: str) -> dict:
     """Проверяет контракт через GoPlus API."""
     chain_id = CHAIN_MAP.get(chain.upper(), "1")
     url = f"https://api.gopluslabs.io/api/v1/token_security/{chain_id}?contract_addresses={address}"
 
-    headers = {}
-    if GOPLUS_APP_KEY:
-        headers["Authorization"] = f"Bearer {GOPLUS_APP_KEY}"
+    headers = {"Accept": "application/json"}
+
+    # Пробуем получить access_token
+    access_token = get_goplus_access_token(GOPLUS_APP_KEY, GOPLUS_APP_SECRET)
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
 
     try:
         r = requests.get(url, headers=headers, timeout=30)
