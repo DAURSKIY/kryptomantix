@@ -9,9 +9,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ---------- СЕКРЕТЫ YANDEXGPT ----------
-# На локале: создай .streamlit/secrets.toml с ключами
-# На Streamlit Cloud: добавь в Settings → Secrets
+# ---------- СЕКРЕТЫ ----------
 try:
     YANDEX_API_KEY = st.secrets["YANDEX_API_KEY"]
     YANDEX_FOLDER_ID = st.secrets["YANDEX_FOLDER_ID"]
@@ -19,6 +17,15 @@ except Exception:
     YANDEX_API_KEY = ""
     YANDEX_FOLDER_ID = ""
 
+try:
+    GOPLUS_APP_KEY = st.secrets["GOPLUS_APP_KEY"]
+    GOPLUS_APP_SECRET = st.secrets["GOPLUS_APP_SECRET"]
+except Exception:
+    GOPLUS_APP_KEY = ""
+    GOPLUS_APP_SECRET = ""
+
+
+# ---------- YANDEXGPT ----------
 def get_ai_verdict(metrics: dict, flags: list) -> str:
     """Отправляет метрики и флаги в YandexGPT."""
     if not YANDEX_API_KEY or not YANDEX_FOLDER_ID:
@@ -33,7 +40,6 @@ def get_ai_verdict(metrics: dict, flags: list) -> str:
     }
     verdict_ru = verdict_map.get(metrics.get("Вердикт", ""), "не определён")
 
-    # Собираем флаги в текст
     flags_text = "\n".join([f"— {text}" for level, text in flags])
 
     prompt_text = f"""Ты — AI-аналитик мемкоинов. Проанализируй готовый отчёт сканера и напиши краткий вердикт на русском языке.
@@ -56,8 +62,8 @@ FDV: {metrics.get('FDV', 'N/A')}
 2. Опирайся ТОЛЬКО на строки из «Анализ сканера» выше. Не выдумывай.
 3. Если в анализе написано «Достаточная ликвидность» — НЕ пиши про низкую ликвидность.
 4. Если в анализе написано «Здоровый объём» — НЕ пиши про низкий объём.
-5. Обязательно упомяни главные КРАСНЫЕ флаги (🔴). Если их нет — упомяни ЖЁЛТЫЕ (🟡).
-6. Если вердикт «СКАМ» или «РИСК» — прямо предупреди: «не входи», «высокий риск рага», «вероятен скам».
+5. Обязательно упомяни главные КРАСНЫЕ флаги. Если их нет — упомяни ЖЁЛТЫЕ.
+6. Если вердикт «СКАМ» или «РИСК» — прямо предупреди: «не входи», «высокий риск рага».
 7. Если вердикт «ГЕМ» — укажи потенциал и напомни о рисках.
 8. Если вердикт «УСТОЯВШИЙСЯ» — скажи, что безопасный, но без роста.
 9. Никаких общих фраз про волатильность криптовалют.
@@ -92,6 +98,103 @@ FDV: {metrics.get('FDV', 'N/A')}
         return f"⚠️ Ошибка AI-анализа: {str(e)[:200]}"
 
 
+# ---------- GOPLUS ----------
+CHAIN_MAP = {
+    "SOLANA": "solana",
+    "ETHEREUM": "1",
+    "BSC": "56",
+    "BASE": "8453",
+    "POLYGON": "137",
+    "ARBITRUM": "42161",
+    "OPTIMISM": "10",
+    "AVALANCHE": "43114",
+}
+
+
+def check_contract(address: str, chain: str) -> dict:
+    """Проверяет контракт через GoPlus API."""
+    chain_id = CHAIN_MAP.get(chain.upper(), "1")
+    url = f"https://api.gopluslabs.io/api/v1/token_security/{chain_id}?contract_addresses={address}"
+
+    headers = {}
+    if GOPLUS_APP_KEY:
+        headers["Authorization"] = f"Bearer {GOPLUS_APP_KEY}"
+
+    try:
+        r = requests.get(url, headers=headers, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+
+        if data.get("code") != 1 or not data.get("result"):
+            return {"error": f"GoPlus: {data.get('message', 'no data')}"}
+
+        result = data["result"]
+        token_data = None
+        for key in result:
+            token_data = result[key]
+            break
+
+        if not token_data:
+            return {"error": "Контракт не найден в базе GoPlus"}
+
+        is_honeypot = token_data.get("is_honeypot") == "1"
+        is_mintable = token_data.get("is_mintable") == "1"
+        is_open_source = token_data.get("is_open_source") == "1"
+        is_proxy = token_data.get("is_proxy") == "1"
+        is_blacklisted = token_data.get("is_blacklisted") == "1"
+        hidden_owner = token_data.get("hidden_owner") == "1"
+        can_take_back = token_data.get("can_take_back_ownership") == "1"
+        owner_address = token_data.get("owner_address", "")
+        buy_tax = float(token_data.get("buy_tax", "0") or "0")
+        sell_tax = float(token_data.get("sell_tax", "0") or "0")
+        holder_count = token_data.get("holder_count", "0")
+
+        dangers = []
+        if is_honeypot:
+            dangers.append("honeypot")
+        if is_blacklisted:
+            dangers.append("blacklist")
+        if hidden_owner:
+            dangers.append("hidden_owner")
+
+        warnings = []
+        if is_mintable:
+            warnings.append("mint")
+        if is_proxy:
+            warnings.append("proxy")
+        if can_take_back:
+            warnings.append("take_back_ownership")
+        if buy_tax > 0.1 or sell_tax > 0.1:
+            warnings.append("high_tax")
+
+        if dangers:
+            verdict = "danger"
+        elif warnings:
+            verdict = "warning"
+        else:
+            verdict = "safe"
+
+        return {
+            "verdict": verdict,
+            "is_honeypot": is_honeypot,
+            "is_mintable": is_mintable,
+            "is_open_source": is_open_source,
+            "is_proxy": is_proxy,
+            "is_blacklisted": is_blacklisted,
+            "hidden_owner": hidden_owner,
+            "can_take_back": can_take_back,
+            "owner_address": owner_address,
+            "buy_tax": buy_tax,
+            "sell_tax": sell_tax,
+            "holder_count": holder_count,
+            "dangers": dangers,
+            "warnings": warnings,
+        }
+    except Exception as e:
+        return {"error": f"Ошибка проверки: {str(e)[:200]}"}
+
+
+# ---------- CSS ----------
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
@@ -276,7 +379,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ---------- ФУНКЦИИ ----------
+# ---------- DEXSCREENER ----------
 @st.cache_data(ttl=60)
 def fetch_token_data(address: str):
     url = f"https://api.dexscreener.com/latest/dex/tokens/{address}"
@@ -306,7 +409,6 @@ def analyze(pair: dict):
     if created:
         age_days = (datetime.now().timestamp() * 1000 - created) / 1000 / 3600 / 24
 
-    # ---------- БЕЗОПАСНОСТЬ ----------
     if liq < 5000:
         flags.append(("red", f"🔴 Критически низкая ликвидность: ${liq:,.0f}"))
         score -= 3
@@ -374,7 +476,6 @@ def analyze(pair: dict):
         flags.append(("yellow", f"🟡 Сильное падение: {price_change:.1f}%"))
         score -= 1
 
-    # ---------- ПОТЕНЦИАЛ ГЕМА ----------
     if 7 <= age_days <= 90:
         gem_points += 2
         flags.append(("green", f"💎 Молодой токен ({age_days:.0f} дней) — потенциал роста"))
@@ -406,7 +507,6 @@ def analyze(pair: dict):
     if total_tx > 0 and buys > sells * 1.2:
         gem_points += 1
 
-    # ---------- ВЕРДИКТ ----------
     if score < 0:
         verdict = "scam"
     elif score < 3:
@@ -475,7 +575,7 @@ if scan and address.strip():
             <div class="verdict-card verdict-young">
                 <div class="verdict-emoji">🌱</div>
                 <div class="verdict-title">МОЛОДОЙ</div>
-                <div class="verdict-desc">Токену меньше 7 дней. Потенциал есть, но и риск высокий. Не гем и не скам.</div>
+                <div class="verdict-desc">Токену меньше 7 дней. Потенциал есть, но и риск высокий.</div>
             </div>
             """, unsafe_allow_html=True)
         elif verdict == "established":
@@ -491,7 +591,7 @@ if scan and address.strip():
             <div class="verdict-card verdict-risk">
                 <div class="verdict-emoji">⚠️</div>
                 <div class="verdict-title">РИСК</div>
-                <div class="verdict-desc">Есть тревожные сигналы. Будь осторожен, проверь вручную.</div>
+                <div class="verdict-desc">Есть тревожные сигналы. Будь осторожен.</div>
             </div>
             """, unsafe_allow_html=True)
         else:
@@ -499,7 +599,7 @@ if scan and address.strip():
             <div class="verdict-card verdict-scam">
                 <div class="verdict-emoji">☠️</div>
                 <div class="verdict-title">СКАМ / ВЫСОКИЙ РИСК</div>
-                <div class="verdict-desc">Красные флаги. Не входи. Скорее всего, потеряешь деньги.</div>
+                <div class="verdict-desc">Красные флаги. Не входи.</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -519,7 +619,7 @@ if scan and address.strip():
         for level, text in flags:
             st.markdown(f'<div class="flag-item flag-{level}">{text}</div>', unsafe_allow_html=True)
 
-        # ---------- AI-АНАЛИЗ ----------
+        # AI-АНАЛИЗ
         st.markdown("### 🤖 AI-анализ")
         with st.spinner("🤖 YandexGPT изучает данные..."):
             ai_verdict = get_ai_verdict(metrics, flags)
@@ -529,6 +629,44 @@ if scan and address.strip():
             {ai_verdict}
         </div>
         """, unsafe_allow_html=True)
+
+        # ПРОВЕРКА КОНТРАКТА
+        st.markdown("### 🛡️ Проверка контракта")
+        with st.spinner("🛡️ GoPlus проверяет контракт..."):
+            contract = check_contract(address.strip(), metrics.get("Сеть", ""))
+
+        if "error" in contract:
+            st.warning(contract["error"])
+        else:
+            v = contract["verdict"]
+            if v == "safe":
+                st.markdown("""
+                <div class="flag-item flag-green" style="font-size:17px; padding:18px;">
+                    ✅ <b>Контракт безопасный</b> — опасных функций не найдено
+                </div>
+                """, unsafe_allow_html=True)
+            elif v == "warning":
+                st.markdown("""
+                <div class="flag-item flag-yellow" style="font-size:17px; padding:18px;">
+                    ⚠️ <b>Есть риски</b> — проверь детали ниже
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div class="flag-item flag-red" style="font-size:17px; padding:18px;">
+                    ☠️ <b>Опасный контракт</b> — не входи
+                </div>
+                """, unsafe_allow_html=True)
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(f'<div class="flag-item flag-{"red" if contract["is_honeypot"] else "green"}">{"🔴" if contract["is_honeypot"] else "🟢"} Honeypot: {"Да" if contract["is_honeypot"] else "Нет"}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="flag-item flag-{"yellow" if contract["is_mintable"] else "green"}">{"🟡" if contract["is_mintable"] else "🟢"} Mint: {"Есть — можно печатать токены" if contract["is_mintable"] else "Отключён"}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="flag-item flag-{"red" if contract["is_blacklisted"] else "green"}">{"🔴" if contract["is_blacklisted"] else "🟢"} Blacklist: {"Есть" if contract["is_blacklisted"] else "Нет"}</div>', unsafe_allow_html=True)
+            with col2:
+                st.markdown(f'<div class="flag-item flag-{"green" if contract["is_open_source"] else "yellow"}">{"🟢" if contract["is_open_source"] else "🟡"} Open source: {"Да" if contract["is_open_source"] else "Нет"}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="flag-item flag-{"yellow" if contract["is_proxy"] else "green"}">{"🟡" if contract["is_proxy"] else "🟢"} Proxy: {"Да" if contract["is_proxy"] else "Нет"}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="flag-item flag-{"yellow" if contract["buy_tax"] > 0.1 or contract["sell_tax"] > 0.1 else "green"}">{"🟡" if contract["buy_tax"] > 0.1 or contract["sell_tax"] > 0.1 else "🟢"} Налоги: {contract["buy_tax"]*100:.1f}% / {contract["sell_tax"]*100:.1f}%</div>', unsafe_allow_html=True)
 
         st.markdown("""
         <div class="disclaimer">
