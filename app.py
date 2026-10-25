@@ -132,8 +132,14 @@ def get_goplus_access_token(app_key: str, app_secret: str) -> str:
 
 
 def check_contract(address: str, chain: str) -> dict:
-    chain_id = CHAIN_MAP.get(chain.upper(), "1")
-    url = f"https://api.gopluslabs.io/api/v1/token_security/{chain_id}?contract_addresses={address}"
+    # --- ИЗМЕНЕНИЕ: Разделяем эндпоинты для Solana и EVM-сетей ---
+    if chain.upper() == "SOLANA":
+        url = f"https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses={address}"
+    else:
+        chain_id = CHAIN_MAP.get(chain.upper(), "1")
+        url = f"https://api.gopluslabs.io/api/v1/token_security/{chain_id}?contract_addresses={address}"
+    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
     headers = {"Accept": "application/json"}
     token = get_goplus_access_token(GOPLUS_APP_KEY, GOPLUS_APP_SECRET)
     if token:
