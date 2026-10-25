@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import hashlib
 import time
+import urllib.parse
 from datetime import datetime
 
 st.set_page_config(
@@ -33,56 +34,51 @@ def get_ai_verdict(metrics: dict, flags: list, contract: dict = None) -> str:
         return "⚠️ AI-анализ не настроен."
 
     verdict_map = {
-        "gem": "ГЕМ",
-        "young": "МОЛОДОЙ",
-        "established": "УСТОЯВШИЙСЯ",
-        "risk": "РИСК",
-        "scam": "СКАМ",
+        "gem": "ГЕМ (молодой, недооценённый, с потенциалом)",
+        "young": "МОЛОДОЙ (свежий токен, высокий риск)",
+        "established": "УСТОЯВШИЙСЯ (известный, безопасный, без потенциала иксов)",
+        "risk": "РИСК (есть тревожные сигналы)",
+        "scam": "СКАМ (красные флаги, не входить)",
     }
     verdict_ru = verdict_map.get(metrics.get("Вердикт", ""), "не определён")
 
-    # Собираем только красные и жёлтые флаги для AI
-    red_flags = [text for level, text in flags if level == "red"]
-    yellow_flags = [text for level, text in flags if level == "yellow"]
-    flags_text = ""
-    if red_flags:
-        flags_text += "КРАСНЫЕ ФЛАГИ:\n" + "\n".join(f"— {t}" for t in red_flags) + "\n"
-    if yellow_flags:
-        flags_text += "ЖЁЛТЫЕ ФЛАГИ:\n" + "\n".join(f"— {t}" for t in yellow_flags) + "\n"
-    if not flags_text:
-        flags_text = "Критических флагов нет."
+    flags_text = "\n".join([f"— {text}" for level, text in flags])
 
     contract_text = ""
     if contract and "error" not in contract:
         c_v = contract.get("verdict", "")
         c_map = {"safe": "безопасный", "warning": "есть риски", "danger": "ОПАСНЫЙ"}
         contract_text = f"""
-ПРОВЕРКА КОНТРАКТА:
+ПРОВЕРКА КОНТРАКТА (GoPlus):
 Вердикт: {c_map.get(c_v, c_v)}
 Honeypot: {"Да" if contract.get("is_honeypot") else "Нет"}
-Mint: {"Есть" if contract.get("is_mintable") else "Отключён"}
+Mint: {"Есть — можно печатать токены" if contract.get("is_mintable") else "Отключён"}
+Blacklist: {"Есть" if contract.get("is_blacklisted") else "Нет"}
 Скрытый владелец: {"Да" if contract.get("hidden_owner") else "Нет"}
 """
 
-    prompt_text = f"""Ты — AI-аналитик мемкоинов. Напиши краткий вердикт на русском языке.
+    prompt_text = f"""Ты — AI-аналитик мемкоинов. Проанализируй готовый отчёт сканера и напиши краткий вердикт на русском языке.
 
-ОТЧЁТ:
-Вердикт сканера: {verdict_ru}
+ОТЧЁТ СКАНЕРА:
+Вердикт: {verdict_ru}
 Сеть: {metrics.get('Сеть', 'N/A')}
+Пара: {metrics.get('Пара', 'N/A')}
 Ликвидность: {metrics.get('Ликвидность', 'N/A')}
 Объём 24ч: {metrics.get('Объём 24ч', 'N/A')}
+FDV: {metrics.get('FDV', 'N/A')}
 Изменение 24ч: {metrics.get('Δ 24ч', 'N/A')}
+Покупки: {metrics.get('Покупки', 'N/A')} / Продажи: {metrics.get('Продажи', 'N/A')}
 
+АНАЛИЗ СКАНЕРА:
 {flags_text}
 {contract_text}
 
 ПРАВИЛА:
-1. Пиши ТОЛЬКО на русском.
-2. Если вердикт РИСК или СКАМ — НАЧНИ с главного риска, а потом добавь 1 предложение контекста. НЕ упоминай потенциал роста.
-3. Если вердикт ГЕМ — упомяни потенциал и предупреди о рисках.
-4. Если вердикт УСТОЯВШИЙСЯ или МОЛОДОЙ — нейтрально: что есть, чего нет.
-5. Не противоречь флагам. Если написано «аномальный объём» — упомяни накрутку.
-6. 2-3 предложения. Без вступлений типа «Данный токен».
+1. Пиши ТОЛЬКО на русском языке.
+2. Опирайся ТОЛЬКО на строки из отчёта выше. Не выдумывай.
+3. Если вердикт РИСК или СКАМ — прямо предупреди: «не входи», «высокий риск».
+4. Если вердикт ГЕМ — укажи потенциал и напомни о рисках.
+5. Пиши 2-3 предложения. Без вступлений вроде «Данный токен представляет собой».
 
 Твой вердикт:"""
 
@@ -95,7 +91,7 @@ Mint: {"Есть" if contract.get("is_mintable") else "Отключён"}
         "modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt-lite",
         "completionOptions": {"stream": False, "temperature": 0.2, "maxTokens": "400"},
         "messages": [
-            {"role": "system", "text": "Ты — криптоаналитик. Отвечай кратко, только русский."},
+            {"role": "system", "text": "Ты — опытный криптоаналитик. Отвечай кратко, по делу, только на русском."},
             {"role": "user", "text": prompt_text}
         ]
     }
@@ -103,9 +99,10 @@ Mint: {"Есть" if contract.get("is_mintable") else "Отключён"}
     try:
         response = requests.post(url, headers=headers, json=body, timeout=60)
         response.raise_for_status()
-        return response.json()["result"]["alternatives"][0]["message"]["text"]
+        result = response.json()
+        return result["result"]["alternatives"][0]["message"]["text"]
     except Exception as e:
-        return f"⚠️ Ошибка AI: {str(e)[:200]}"
+        return f"⚠️ Ошибка AI-анализа: {str(e)[:200]}"
 
 
 # ---------- GOPLUS ----------
@@ -285,7 +282,6 @@ def analyze(pair: dict):
     if created:
         age_days = (datetime.now().timestamp() * 1000 - created) / 1000 / 3600 / 24
 
-    # БЕЗОПАСНОСТЬ
     if liq < 5000:
         flags.append(("red", f"🔴 Критически низкая ликвидность: ${liq:,.0f}"))
         score -= 3
@@ -307,7 +303,7 @@ def analyze(pair: dict):
             flags.append(("green", f"🟢 Возраст: {age_days:.1f} дней"))
             score += 1
     else:
-        flags.append(("yellow", "🟡 Нет данных о дате создания"))
+        flags.append(("yellow", "🟡 Нет данных о дате создания пары"))
         score -= 1
 
     if liq > 0:
@@ -326,8 +322,9 @@ def analyze(pair: dict):
         fdv_liq = fdv / liq
         red_threshold = 5000 if age_days > 30 else 2000
         yellow_threshold = 1000 if age_days > 30 else 500
+
         if fdv_liq > red_threshold:
-            flags.append(("red", f"🔴 FDV в {fdv_liq:.0f}x больше ликвидности."))
+            flags.append(("red", f"🔴 FDV в {fdv_liq:.0f}x больше ликвидности. Критично."))
             score -= 2
         elif fdv_liq > yellow_threshold:
             flags.append(("yellow", f"🟡 FDV в {fdv_liq:.0f}x больше ликвидности."))
@@ -352,50 +349,50 @@ def analyze(pair: dict):
         flags.append(("yellow", f"🟡 Сильное падение: {price_change:.1f}%"))
         score -= 1
 
-    # ПОТЕНЦИАЛ
     if 7 <= age_days <= 90:
         gem_points += 2
+        flags.append(("green", f"💎 Молодой токен ({age_days:.0f} дней) — потенциал роста"))
     elif 3 <= age_days < 7:
         gem_points += 1
     elif age_days > 180:
         gem_points -= 2
+        flags.append(("yellow", "🏛️ Токен старше 6 месяцев — уже не гем"))
 
     if 50000 <= liq <= 5000000:
         gem_points += 2
+        flags.append(("green", "💎 Ликвидность в оптимальной зоне"))
     elif liq > 5000000:
         gem_points -= 1
+        flags.append(("yellow", "🏛️ Очень крупная ликвидность — токен устоявшийся"))
 
     if liq > 0:
         ratio = vol24 / liq
         if 0.3 <= ratio <= 5:
             gem_points += 2
+            flags.append(("green", "💎 Активная здоровая торговля"))
 
     if 5 <= price_change <= 200:
         gem_points += 1
     elif price_change > 500:
         gem_points -= 1
+        flags.append(("yellow", f"🟡 Уже памп +{price_change:.0f}% — поздно входить"))
 
     if total_tx > 0 and buys > sells * 1.2:
         gem_points += 1
 
-    # ВЕРДИКТ
     if score < 0:
         verdict = "scam"
     elif score < 3:
         verdict = "risk"
     elif age_days < 7:
-        verdict = "gem" if gem_points >= 5 else "young"
+        if gem_points >= 5:
+            verdict = "gem"
+        else:
+            verdict = "young"
     elif gem_points >= 5:
         verdict = "gem"
     else:
         verdict = "established"
-
-    # ОЧИСТКА ФЛАГОВ ПРИ РИСКЕ/СКАМ
-    if verdict in ("risk", "scam"):
-        # Убираем все зелёные флаги с "💎" — они сбивают
-        flags = [(level, text) for level, text in flags if "💎" not in text]
-        # Переставляем так, чтобы красные были первыми
-        flags.sort(key=lambda x: {"red": 0, "yellow": 1, "green": 2}.get(x[0], 3))
 
     metrics = {
         "Ликвидность": f"${liq:,.0f}",
@@ -445,6 +442,26 @@ if scan and address.strip():
         else:
             st.markdown("""<div class="verdict-card verdict-scam"><div class="verdict-emoji">☠️</div><div class="verdict-title">СКАМ / ВЫСОКИЙ РИСК</div><div class="verdict-desc">Красные флаги. Не входи.</div></div>""", unsafe_allow_html=True)
 
+        # ---------- КНОПКА ПОДЕЛИТЬСЯ ----------
+        verdict_text = {
+            "gem": "💎 ГЕМ",
+            "young": "🌱 МОЛОДОЙ",
+            "established": "🏛️ УСТОЯВШИЙСЯ",
+            "risk": "⚠️ РИСК",
+            "scam": "☠️ СКАМ"
+        }.get(verdict, "НЕИЗВЕСТНО")
+
+        token_name = metrics.get("Пара", "этот токен")
+        share_text = f"Проверил {token_name} через AI-сканер KRYPTOMANTIX. Вердикт: {verdict_text}! Будьте осторожны."
+        
+        encoded_text = urllib.parse.quote(share_text)
+        vk_share_url = f"https://vk.com/share.php?url=https://kryptomantix.streamlit.app&title={encoded_text}&noparse=true"
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.link_button("🚀 Поделиться результатом в ВК", vk_share_url, use_container_width=True)
+
+        # ---------- МЕТРИКИ ----------
         st.markdown("### 📊 Метрики")
         cols = st.columns(5)
         items = list(metrics.items())[:10]
