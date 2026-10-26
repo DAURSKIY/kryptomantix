@@ -509,6 +509,17 @@ if scan and address.strip():
             ai_verdict = get_ai_verdict(metrics, flags, contract)
         st.markdown(f'<div class="ai-block"><div class="ai-header">🔮 ВЕРДИКТ AI-ОРАКУЛА</div>{ai_verdict}</div>', unsafe_allow_html=True)
 
+                # ---------- КНОПКА ПОКУПКИ (ПАРТНЕРКА) ----------
+        st.markdown("---") # Разделительная линия
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.link_button(
+                "🚀 Купить этот токен на BingX", 
+                "https://bingxdao.com/invite/IHWT6L/", 
+                use_container_width=True
+            )
+            st.caption("Реферальная ссылка. Регистрируясь, вы поддерживаете проект KRYPTOMANTIX. Торговля связана с риском.")
+
         st.markdown('<div class="disclaimer">⚠️ Это не инвестиционная рекомендация. DYOR. KRYPTOMANTIX даёт аналитику, а не совет покупать.</div>', unsafe_allow_html=True)
 
 elif scan and not address.strip():
