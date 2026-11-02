@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KRYPTOMANTIX — AI-инструменты для крипты</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: radial-gradient(circle at 20% 10%, #1a0b2e 0%, #0a0a12 50%, #000000 100%);
+            color: #ffffff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+        }
+
+        .logo {
+            font-size: 52px;
+            font-weight: 800;
+            background: linear-gradient(90deg, #a855f7, #ec4899, #f59e0b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+            letter-spacing: -2px;
+        }
+
+        .subtitle {
+            font-size: 18px;
+            color: #9ca3af;
+            margin-bottom: 40px;
+        }
+
+        .main-btn {
+            display: inline-block;
+            width: 100%;
+            padding: 18px;
+            background: linear-gradient(90deg, #a855f7, #ec4899);
+            color: white;
+            text-decoration: none;
+            font-size: 20px;
+            font-weight: 700;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .main-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(168, 85, 247, 0.4);
+        }
+
+        .links {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .link-card {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            color: #e5e7eb;
+            text-decoration: none;
+            font-size: 16px;
+            font-weight: 600;
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .link-card:hover {
+            background: rgba(168, 85, 247, 0.1);
+            border-color: #a855f7;
+        }
+
+        .link-card span {
+            margin-right: 10px;
+            font-size: 20px;
+        }
+
+        .footer {
+            margin-top: 50px;
+            font-size: 12px;
+            color: #4b5563;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <!-- Логотип и заголовок -->
+        <div class="logo">🔮 KRYPTOMANTIX</div>
+        <div class="subtitle">AI-инструменты для анализа и поиска криптовалют</div>
+
+        <!-- Главная кнопка -->
+        <a href="https://kryptomantix.streamlit.app" class="main-btn">🚀 Открыть AI-сканер</a>
+
+        <!-- Ссылки на сообщества -->
+        <div class="links">
+            <a href="https://vk.com/kryptomantix" class="link-card">
+                <span>💬</span> Наше сообщество ВКонтакте
+            </a>
+            <a href="https://dzen.ru/kryptomantix" class="link-card">
+                <span>📰</span> Статьи и разборы в Дзене
+            </a>
+            <a href="https://vk.com/donut/club224917928" class="link-card">
+                <span>💎</span> Закрытый VIP-чат (VK Donut)
+            </a>
+        </div>
+
+        <!-- Дисклеймер -->
+        <div class="footer">
+            ⚠️ Это не инвестиционная рекомендация. DYOR.<br>
+            Сканер дает аналитику, а не совет покупать.
+        </div>
+    </div>
+
+</body>
+</html>
