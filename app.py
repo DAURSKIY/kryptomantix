@@ -34,11 +34,8 @@ def get_ai_verdict(metrics: dict, flags: list, contract: dict = None) -> str:
         return "⚠️ AI-анализ не настроен."
     
     verdict_map = {
-        "gem": "ГЕМ (молодой, недооценённый, с потенциалом)",
-        "young": "МОЛОДОЙ (свежий токен, высокий риск)",
-        "established": "УСТОЯВШИЙСЯ (известный, безопасный, без потенциала иксов)",
-        "risk": "РИСК (есть тревожные сигналы)",
-        "scam": "СКАМ (красные флаги, не входить)",
+        "gem": "ГЕМ", "young": "МОЛОДОЙ", "established": "УСТОЯВШИЙСЯ",
+        "risk": "РИСК", "scam": "СКАМ",
     }
     verdict_ru = verdict_map.get(metrics.get("Вердикт", ""), "не определён")
     flags_text = "\n".join([f"— {text}" for level, text in flags])
@@ -46,47 +43,22 @@ def get_ai_verdict(metrics: dict, flags: list, contract: dict = None) -> str:
     contract_text = ""
     if contract and "error" not in contract:
         c_v = contract.get("verdict", "")
-        c_map = {"safe": "безопасный", "warning": "есть риски", "danger": "ОПАСНЫЙ"}
-        contract_text = f"""
-ПРОВЕРКА КОНТРАКТА (GoPlus):
-Вердикт: {c_map.get(c_v, c_v)}
-Honeypot: {"Да" if contract.get("is_honeypot") else "Нет"}
-Mint: {"Есть — можно печатать токены" if contract.get("is_mintable") else "Отключён"}
-Blacklist: {"Есть" if contract.get("is_blacklisted") else "Нет"}
-Скрытый владелец: {"Да" if contract.get("hidden_owner") else "Нет"}
-"""
+        contract_text = f"Контракт: {c_v}. Honeypot: {contract.get('is_honeypot')}, Mint: {contract.get('is_mintable')}"
 
-    prompt_text = f"""Ты — AI-аналитик мемкоинов. Проанализируй готовый отчёт сканера и напиши краткий вердикт на русском языке.
-
-ОТЧЁТ СКАНЕРА:
-Вердикт: {verdict_ru}
-Сеть: {metrics.get('Сеть', 'N/A')}
-Пара: {metrics.get('Пара', 'N/A')}
-Ликвидность: {metrics.get('Ликвидность', 'N/A')}
-Объём 24ч: {metrics.get('Объём 24ч', 'N/A')}
-FDV: {metrics.get('FDV', 'N/A')}
-Изменение 24ч: {metrics.get('Δ 24ч', 'N/A')}
-Покупки: {metrics.get('Покупки', 'N/A')} / Продажи: {metrics.get('Продажи', 'N/A')}
-
-АНАЛИЗ СКАНЕРА:
-{flags_text}
-{contract_text}
-
-ПРАВИЛА:
-1. Пиши ТОЛЬКО на русском языке.
-2. Опирайся ТОЛЬКО на строки из отчёта выше. Не выдумывай.
-3. Если вердикт РИСК или СКАМ — прямо предупреди: «не входи», «высокий риск».
-4. Если вердикт ГЕМ — укажи потенциал и напомни о рисках.
-5. Пиши 2-3 предложения. Без вступлений вроде «Данный токен представляет собой».
-
-Твой вердикт:"""
+    prompt_text = f"""Ты — AI-аналитик мемкоинов. Напиши краткий вердикт (2-3 предложения).
+    Вердикт: {verdict_ru}
+    Сеть: {metrics.get('Сеть')}, Пара: {metrics.get('Пара')}
+    Ликвидность: {metrics.get('Ликвидность')}, Объём 24ч: {metrics.get('Объём 24ч')}
+    Флаги: {flags_text}
+    {contract_text}
+    Пиши только на русском, без воды."""
 
     url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
     headers = {"Content-Type": "application/json", "Authorization": f"Api-Key {YANDEX_API_KEY}"}
     body = {
         "modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt-lite",
-        "completionOptions": {"stream": False, "temperature": 0.2, "maxTokens": "400"},
-        "messages": [{"role": "system", "text": "Ты — опытный криптоаналитик."}, {"role": "user", "text": prompt_text}]
+        "completionOptions": {"stream": False, "temperature": 0.2, "maxTokens": "300"},
+        "messages": [{"role": "user", "text": prompt_text}]
     }
     try:
         r = requests.post(url, headers=headers, json=body, timeout=30)
@@ -173,28 +145,15 @@ def fetch_token_data(query: str):
     except Exception as e:
         return {"error": str(e)}
 
-# ---------- ТРЕНДОВЫЕ ТОКЕНЫ (ТОП ПО ОБЪЕМУ) ----------
-@st.cache_data(ttl=300)
+# ---------- СТАТИЧНЫЕ ТРЕНДОВЫЕ ТОКЕНЫ ----------
 def fetch_trending():
-    try:
-        # Берем не trending, а топ по объему торгов (там крупные, безопасные токены)
-        url = "https://api.geckoterminal.com/api/v2/networks/solana/pools?page=1&sort=h24_volume_usd_desc"
-        r = requests.get(url, timeout=10)
-        pools = r.json().get("data", [])[:4] # Берем 4 штуки
-        
-        result = []
-        for p in pools:
-            attr = p.get("attributes", {})
-            name = attr.get("name", "")
-            # Берем только те, где ликвидность больше $100k (чтобы отсечь мусор)
-            liq = float(attr.get("reserve_in_usd", 0) or 0)
-            if liq < 100000: continue
-            
-            base_token_id = p.get("relationships", {}).get("base_token", {}).get("data", {}).get("id")
-            if base_token_id:
-                result.append({"name": name, "address": base_token_id.split("_")[-1]})
-        return result
-    except: return []
+    # Жестко задаем 4 популярных токена для витрины
+    return [
+        {"name": "BONK", "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"},
+        {"name": "WIF", "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm"},
+        {"name": "POPCAT", "address": "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr"},
+        {"name": "PEPE (ETH)", "address": "0x6982508145454Ce325dDbE47a25d4ec3d2311933"}
+    ]
 
 def analyze(pair: dict):
     flags, score, gem_points = [], 0, 0
@@ -275,7 +234,7 @@ st.markdown('<div class="hero"><div class="hero-title">🔮 KRYPTOMANTIX</div><d
 # ---------- UI: ВЫБОР ТРЕНДОВЫХ ТОКЕНОВ ----------
 trending = fetch_trending()
 if trending:
-    st.markdown("#### 🔥 Трендовые токены прямо сейчас")
+    st.markdown("#### 🔥 Популярные токены")
     cols = st.columns(len(trending))
     for i, t in enumerate(trending):
         with cols[i]:
@@ -289,8 +248,7 @@ address = st.text_input("", value=default_addr, placeholder="📍 Вставь �
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     scan = st.button("🔮 СКАНИРОВАТЬ", use_container_width=True)
-
-# Кнопка-пример для новичков
+    
     if st.button("🪙 Попробовать на BONK (пример)", use_container_width=True):
         st.session_state.scan_address = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
         st.rerun()
@@ -300,7 +258,7 @@ if scan and address.strip():
     if st.session_state.scan_count >= 3:
         st.error("🛑 Вы исчерпали лимит бесплатных проверок на сегодня (3/3).")
         st.info("Оформите подписку VK Donut за 100₽/мес для безлимитного доступа.")
-        st.link_button("💎 Оформить подписку", "https://vk.com/donut/club224917928")
+        st.link_button("💎 Оформить подписку за 100₽", "https://vk.com/donut/club224917928")
         st.stop()
     
     with st.spinner("🔮 Ищу токен и анализирую..."):
