@@ -145,14 +145,14 @@ def fetch_token_data(query: str):
     except Exception as e:
         return {"error": str(e)}
 
-# ---------- СТАТИЧНЫЕ ТРЕНДОВЫЕ ТОКЕНЫ ----------
+    # ---------- СТАТИЧНЫЕ ТРЕНДОВЫЕ ТОКЕНЫ ----------
 def fetch_trending():
-    # Жестко задаем 4 популярных токена для витрины
+    # Жестко задаем 4 популярных и стабильных токена
     return [
-        {"name": "BONK", "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"},
-        {"name": "WIF", "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm"},
-        {"name": "POPCAT", "address": "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr"},
-        {"name": "PEPE (ETH)", "address": "0x6982508145454Ce325dDbE47a25d4ec3d2311933"}
+        {"name": "BONK", "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"}, # Solana
+        {"name": "WIF", "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm"}, # Solana
+        {"name": "LINK", "address": "0x514910771AF9Ca656af840dff83E8264EcF986CA"}, # Ethereum
+        {"name": "CAKE", "address": "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82"} # BSC
     ]
 
 def analyze(pair: dict):
