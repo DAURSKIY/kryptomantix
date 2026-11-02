@@ -282,6 +282,11 @@ col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     scan = st.button("🔮 СКАНИРОВАТЬ", use_container_width=True)
 
+# Кнопка-пример для новичков
+    if st.button("🪙 Попробовать на BONK (пример)", use_container_width=True):
+        st.session_state.scan_address = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+        st.rerun()
+
 # ---------- ЛОГИКА СКАНИРОВАНИЯ И ЛИМИТА ----------
 if scan and address.strip():
     if st.session_state.scan_count >= 3:
