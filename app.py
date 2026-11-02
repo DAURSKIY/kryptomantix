@@ -181,41 +181,15 @@ def analyze(pair: dict):
     }
     return verdict, flags, gem_points, metrics
 
-# ---------- ТРЕНДОВЫЕ ТОКЕНЫ (С ФИЛЬТРОМ ДУБЛИКАТОВ) ----------
-@st.cache_data(ttl=600)
+# ---------- СТАТИЧНЫЕ ТРЕНДОВЫЕ ТОКЕНЫ (ВИТРИНА) ----------
 def fetch_trending():
-    try:
-        r = requests.get("https://api.geckoterminal.com/api/v2/networks/solana/pools?page=1&sort=h24_volume_usd_desc", timeout=10)
-        pools = r.json().get("data", [])[:30] # Берем больше пулов на проверку
-        
-        good_tokens = []
-        seen_names = set() # Отсекаем дубликаты по имени
-        
-        for p in pools:
-            attr = p.get("attributes", {})
-            liq = float(attr.get("reserve_in_usd", 0) or 0)
-            if liq < 500000: continue # Только крупные токены
-            
-            base_token_id = p.get("relationships", {}).get("base_token", {}).get("data", {}).get("id")
-            if not base_token_id: continue
-            
-            addr = base_token_id.split("_")[-1]
-            symbol = attr.get("name", "").split("/")[0].strip() # Берем только тикер (до слэша)
-            
-            # Если мы уже добавили этот токен, пропускаем
-            if symbol in seen_names:
-                continue
-                
-            seen_names.add(symbol)
-            good_tokens.append({"name": symbol, "address": addr})
-                
-            if len(good_tokens) >= 4:
-                break
-                
-        return good_tokens
-    except Exception as e:
-        print(e)
-        return []
+    # Жестко задаем 4 красивых токена, чтобы витрина всегда выглядела отлично
+    return [
+        {"name": "BONK", "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"}, # Solana
+        {"name": "WIF", "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm"}, # Solana
+        {"name": "PEPE", "address": "0x6982508145454Ce325dDbE47a25d4ec3d2311933"}, # Ethereum
+        {"name": "CAKE", "address": "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82"} # BSC
+    ]
 
 # ---------- СТИЛИ (CSS) ----------
 st.markdown("""
@@ -249,7 +223,6 @@ if trending:
     cols = st.columns(len(trending))
     for i, t in enumerate(trending):
         with cols[i]:
-            # ДОБАВЛЕН key=f"trend_btn_{i}" для уникальности
             if st.button(f"{t['name']}", key=f"trend_btn_{i}", use_container_width=True):
                 st.session_state.scan_address = t['address']
                 st.rerun()
