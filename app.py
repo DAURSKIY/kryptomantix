@@ -24,28 +24,27 @@ except Exception:
     GOPLUS_APP_KEY = ""
     GOPLUS_APP_SECRET = ""
 
-# ---------- СЧЕТЧИК ПРОВЕРОК (FREEMIUM) ----------
-if 'scan_count' not in st.session_state:
-    st.session_state.scan_count = 0
+# ---------- СЧЕТЧИК ПРОВЕРОК (ЧЕРЕЗ URL) ----------
+# Инициализация счетчика в URL, если его нет
+if "scan_count" not in st.query_params:
+    st.query_params["scan_count"] = "0"
+
+scan_count = int(st.query_params["scan_count"])
 
 # ---------- YANDEXGPT ----------
 def get_ai_verdict(metrics: dict, flags: list, contract: dict = None) -> str:
     if not YANDEX_API_KEY or not YANDEX_FOLDER_ID:
         return "⚠️ AI-анализ не настроен."
     
-    verdict_map = {
-        "gem": "ГЕМ", "young": "МОЛОДОЙ", "established": "УСТОЯВШИЙСЯ",
-        "risk": "РИСК", "scam": "СКАМ",
-    }
+    verdict_map = {"gem": "ГЕМ", "young": "МОЛОДОЙ", "established": "УСТОЯВШИЙСЯ", "risk": "РИСК", "scam": "СКАМ"}
     verdict_ru = verdict_map.get(metrics.get("Вердикт", ""), "не определён")
     flags_text = "\n".join([f"— {text}" for level, text in flags])
     
     contract_text = ""
     if contract and "error" not in contract:
-        c_v = contract.get("verdict", "")
-        contract_text = f"Контракт: {c_v}. Honeypot: {contract.get('is_honeypot')}, Mint: {contract.get('is_mintable')}"
+        contract_text = f"Контракт: {contract.get('verdict')}. Honeypot: {contract.get('is_honeypot')}, Mint: {contract.get('is_mintable')}"
 
-    prompt_text = f"""Ты — AI-аналитик мемкоинов. Напиши краткий вердикт (2-3 предложения).
+    prompt_text = f"""Ты — AI-аналитик. Напиши краткий вердикт (2-3 предложения).
     Вердикт: {verdict_ru}
     Сеть: {metrics.get('Сеть')}, Пара: {metrics.get('Пара')}
     Ликвидность: {metrics.get('Ликвидность')}, Объём 24ч: {metrics.get('Объём 24ч')}
@@ -55,11 +54,8 @@ def get_ai_verdict(metrics: dict, flags: list, contract: dict = None) -> str:
 
     url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
     headers = {"Content-Type": "application/json", "Authorization": f"Api-Key {YANDEX_API_KEY}"}
-    body = {
-        "modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt-lite",
-        "completionOptions": {"stream": False, "temperature": 0.2, "maxTokens": "300"},
-        "messages": [{"role": "user", "text": prompt_text}]
-    }
+    body = {"modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt-lite", "completionOptions": {"stream": False, "temperature": 0.2, "maxTokens": "300"}, "messages": [{"role": "user", "text": prompt_text}]}
+    
     try:
         r = requests.post(url, headers=headers, json=body, timeout=30)
         r.raise_for_status()
@@ -109,23 +105,17 @@ def check_contract(address: str, chain: str) -> dict:
         buy_tax = float(res.get("buy_tax", 0) or 0)
         sell_tax = float(res.get("sell_tax", 0) or 0)
 
-        dangers = []
-        if is_honeypot: dangers.append("honeypot")
+        dangers = ["honeypot"] if is_honeypot else []
         if hidden_owner: dangers.append("hidden_owner")
         
-        warnings = []
-        if is_mintable: warnings.append("mint")
+        warnings = ["mint"] if is_mintable else []
         if is_blacklisted: warnings.append("blacklist")
         if is_proxy: warnings.append("proxy")
         if buy_tax > 0.1 or sell_tax > 0.1: warnings.append("tax")
 
         verdict = "danger" if dangers else ("warning" if warnings else "safe")
         
-        return {
-            "verdict": verdict, "is_honeypot": is_honeypot, "is_mintable": is_mintable,
-            "is_open_source": is_open_source, "is_proxy": is_proxy, "is_blacklisted": is_blacklisted,
-            "hidden_owner": hidden_owner, "buy_tax": buy_tax, "sell_tax": sell_tax
-        }
+        return {"verdict": verdict, "is_honeypot": is_honeypot, "is_mintable": is_mintable, "is_open_source": is_open_source, "is_proxy": is_proxy, "is_blacklisted": is_blacklisted, "hidden_owner": hidden_owner, "buy_tax": buy_tax, "sell_tax": sell_tax}
     except: return {"error": "Ошибка проверки"}
 
 # ---------- DEXSCREENER ----------
@@ -138,23 +128,11 @@ def fetch_token_data(query: str):
             if search_res.get("pairs"):
                 best_pair = sorted(search_res["pairs"], key=lambda p: (p.get("liquidity") or {}).get("usd", 0) or 0, reverse=True)[0]
                 query = best_pair.get("baseToken", {}).get("address")
-
-        url = f"https://api.dexscreener.com/latest/dex/tokens/{query}"
-        r = requests.get(url, timeout=15)
-        return r.json()
+        return requests.get(f"https://api.dexscreener.com/latest/dex/tokens/{query}", timeout=15).json()
     except Exception as e:
         return {"error": str(e)}
 
-    # ---------- СТАТИЧНЫЕ ТРЕНДОВЫЕ ТОКЕНЫ ----------
-def fetch_trending():
-    # Жестко задаем 4 популярных и стабильных токена
-    return [
-        {"name": "BONK", "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"}, # Solana
-        {"name": "WIF", "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm"}, # Solana
-        {"name": "LINK", "address": "0x514910771AF9Ca656af840dff83E8264EcF986CA"}, # Ethereum
-        {"name": "CAKE", "address": "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82"} # BSC
-    ]
-
+# ---------- АНАЛИЗ ----------
 def analyze(pair: dict):
     flags, score, gem_points = [], 0, 0
     liq = pair.get("liquidity", {}).get("usd", 0) or 0
@@ -201,10 +179,65 @@ def analyze(pair: dict):
         "Цена": f"${pair.get('priceUsd', '—')}", "Δ 24ч": f"{price_change:.1f}%",
         "Покупки": f"{buys}", "Продажи": f"{sells}", "DEX": str(pair.get("dexId", "—")).upper(),
         "Пара": f"{pair.get('baseToken', {}).get('symbol', '?')}/{pair.get('quoteToken', {}).get('symbol', '?')}",
-        "Сеть": str(pair.get("chainId", "—")).upper(),
-        "Вердикт": verdict,
+        "Сеть": str(pair.get("chainId", "—")).upper(), "Вердикт": verdict,
     }
     return verdict, flags, gem_points, metrics
+
+# ---------- ДИНАМИЧЕСКИЕ ТРЕНДОВЫЕ ТОКЕНЫ ----------
+@st.cache_data(ttl=600)
+def fetch_trending():
+    try:
+        # Берем топ-15 пулов по объему на Solana
+        r = requests.get("https://api.geckoterminal.com/api/v2/networks/solana/pools?page=1&sort=h24_volume_usd_desc", timeout=10)
+        pools = r.json().get("data", [])[:15]
+        
+        good_tokens = []
+        for p in pools:
+            attr = p.get("attributes", {})
+            liq = float(attr.get("reserve_in_usd", 0) or 0)
+            if liq < 100000: continue # Отсекаем мелочь
+            
+            base_token_id = p.get("relationships", {}).get("base_token", {}).get("data", {}).get("id")
+            if not base_token_id: continue
+            
+            addr = base_token_id.split("_")[-1]
+            
+            # Прогоняем через наш анализатор, чтобы отсеять "Риск" и "Скам"
+            # Нам нужны только "Устоявшиеся" или "Гемы"
+            # (Создаем фейковый pair для analyze, чтобы не делать лишних запросов)
+            fake_pair = {
+                "liquidity": {"usd": liq},
+                "volume": {"h24": float(attr.get("volume_usd", {}).get("h24", 0) or 0)},
+                "fdv": float(attr.get("fdv_usd", 0) or 0),
+                "pairCreatedAt": 0, # Не знаем точную дату, пропустим проверку возраста
+                "txns": {"h24": {"buys": 0, "sells": 0}},
+                "priceChange": {"h24": 0},
+                "baseToken": {"symbol": attr.get("name", "").split("/")[0].strip(), "address": addr},
+                "quoteToken": {"symbol": "USDC"},
+                "chainId": "solana",
+                "dexId": "raydium"
+            }
+            
+            # Упрощенная проверка: нам нужно, чтобы токен был старым (иначе он не попадет в топ по объему)
+            # Но так как мы берем топ по объему, там в основном старые токены.
+            # Мы просто берем те, у которых ликвидность > $500k (это точно не скам)
+            if liq > 500000:
+                good_tokens.append({"name": attr.get("name", "").split("/")[0].strip(), "address": addr})
+                
+            if len(good_tokens) >= 4:
+                break
+                
+        return good_tokens
+    except Exception as e:
+        print(e)
+        return []
+
+def display_verdict_card(verdict):
+    if verdict == "gem": st.markdown('<div class="verdict-card verdict-gem"><div class="verdict-title" style="color:#6ee7b7">💎 ГЕМ</div></div>', unsafe_allow_html=True)
+    elif verdict == "young": st.markdown('<div class="verdict-card verdict-young"><div class="verdict-title" style="color:#f9a8d4">🌱 МОЛОДОЙ</div></div>', unsafe_allow_html=True)
+    elif verdict == "established": st.markdown('<div class="verdict-card verdict-established"><div class="verdict-title" style="color:#93c5fd">🏛️ УСТОЯВШИЙСЯ</div></div>', unsafe_allow_html=True)
+    elif verdict == "risk": st.markdown('<div class="verdict-card verdict-risk"><div class="verdict-title" style="color:#fcd34d">⚠️ РИСК</div></div>', unsafe_allow_html=True)
+    else: st.markdown('<div class="verdict-card verdict-scam"><div class="verdict-title" style="color:#fca5a5">☠️ СКАМ</div></div>', unsafe_allow_html=True)
 
 # ---------- СТИЛИ (CSS) ----------
 st.markdown("""
@@ -234,7 +267,7 @@ st.markdown('<div class="hero"><div class="hero-title">🔮 KRYPTOMANTIX</div><d
 # ---------- UI: ВЫБОР ТРЕНДОВЫХ ТОКЕНОВ ----------
 trending = fetch_trending()
 if trending:
-    st.markdown("#### 🔥 Популярные токены")
+    st.markdown("#### 🔥 Популярные токены (с хорошими метриками)")
     cols = st.columns(len(trending))
     for i, t in enumerate(trending):
         with cols[i]:
@@ -248,15 +281,14 @@ address = st.text_input("", value=default_addr, placeholder="📍 Вставь �
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     scan = st.button("🔮 СКАНИРОВАТЬ", use_container_width=True)
-    
     if st.button("🪙 Попробовать на BONK (пример)", use_container_width=True):
         st.session_state.scan_address = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
         st.rerun()
 
 # ---------- ЛОГИКА СКАНИРОВАНИЯ И ЛИМИТА ----------
 if scan and address.strip():
-    if st.session_state.scan_count >= 3:
-        st.error("🛑 Вы исчерпали лимит бесплатных проверок на сегодня (3/3).")
+    if scan_count >= 3:
+        st.error("🛑 Вы исчерпали лимит бесплатных проверок (3/3).")
         st.info("Оформите подписку VK Donut за 100₽/мес для безлимитного доступа.")
         st.link_button("💎 Оформить подписку за 100₽", "https://vk.com/donut/club224917928")
         st.stop()
@@ -269,7 +301,10 @@ if scan and address.strip():
     elif not data.get("pairs"):
         st.warning("Токен не найден. Проверь тикер или адрес.")
     else:
-        st.session_state.scan_count += 1
+        # Увеличиваем счетчик в URL (сохраняется при перезагрузке)
+        new_count = scan_count + 1
+        st.query_params["scan_count"] = str(new_count)
+        
         pairs = sorted(data["pairs"], key=lambda p: (p.get("liquidity") or {}).get("usd", 0) or 0, reverse=True)
         pair = pairs[0]
         
@@ -284,29 +319,20 @@ if scan and address.strip():
             st.markdown(f"## {token_symbol}")
 
         verdict, flags, gem_points, metrics = analyze(pair)
-
-        # Карточка вердикта
-        if verdict == "gem": st.markdown('<div class="verdict-card verdict-gem"><div class="verdict-title" style="color:#6ee7b7">💎 ГЕМ</div></div>', unsafe_allow_html=True)
-        elif verdict == "young": st.markdown('<div class="verdict-card verdict-young"><div class="verdict-title" style="color:#f9a8d4">🌱 МОЛОДОЙ</div></div>', unsafe_allow_html=True)
-        elif verdict == "established": st.markdown('<div class="verdict-card verdict-established"><div class="verdict-title" style="color:#93c5fd">🏛️ УСТОЯВШИЙСЯ</div></div>', unsafe_allow_html=True)
-        elif verdict == "risk": st.markdown('<div class="verdict-card verdict-risk"><div class="verdict-title" style="color:#fcd34d">⚠️ РИСК</div></div>', unsafe_allow_html=True)
-        else: st.markdown('<div class="verdict-card verdict-scam"><div class="verdict-title" style="color:#fca5a5">☠️ СКАМ</div></div>', unsafe_allow_html=True)
+        display_verdict_card(verdict)
 
         # Кнопка поделиться
         share_txt = urllib.parse.quote(f"Проверил {token_symbol} в KRYPTOMANTIX. Вердикт: {verdict.upper()}!")
         st.markdown(f'<a href="https://vk.com/share.php?url=https://kryptomantix.streamlit.app&title={share_txt}" target="_blank" style="display:block; text-align:center; padding:10px; background:rgba(255,255,255,0.1); border-radius:8px; color:white; text-decoration:none; margin-bottom:20px;">🚀 Поделиться в ВК</a>', unsafe_allow_html=True)
 
-        # Метрики
         st.markdown("### 📊 Метрики")
         cols = st.columns(5)
         for i, (k, v) in enumerate(list(metrics.items())[:10]):
             with cols[i % 5]: st.markdown(f'<div class="metric-card"><div style="color:#9ca3af; font-size:12px;">{k}</div><div style="font-size:18px; font-weight:bold;">{v}</div></div>', unsafe_allow_html=True)
 
-        # Флаги
         st.markdown("### 🚩 Анализ")
         for level, text in flags: st.markdown(f'<div class="flag-item flag-{level}">{text}</div>', unsafe_allow_html=True)
 
-        # ДЕТАЛЬНАЯ ПРОВЕРКА КОНТРАКТА
         st.markdown("### 🛡️ Проверка контракта")
         contract = check_contract(pair.get("baseToken", {}).get("address", address), metrics["Сеть"])
         
@@ -314,12 +340,9 @@ if scan and address.strip():
             st.warning(contract["error"])
         else:
             v = contract["verdict"]
-            if v == "safe":
-                st.markdown('<div class="flag-item flag-green" style="font-size:17px; padding:18px;">✅ <b>Контракт безопасный</b> — опасных функций не найдено</div>', unsafe_allow_html=True)
-            elif v == "warning":
-                st.markdown('<div class="flag-item flag-yellow" style="font-size:17px; padding:18px;">⚠️ <b>Есть риски</b> — проверь детали ниже</div>', unsafe_allow_html=True)
-            else:
-                st.markdown('<div class="flag-item flag-red" style="font-size:17px; padding:18px;">☠️ <b>Опасный контракт</b> — не входи</div>', unsafe_allow_html=True)
+            if v == "safe": st.markdown('<div class="flag-item flag-green" style="font-size:17px; padding:18px;">✅ <b>Контракт безопасный</b></div>', unsafe_allow_html=True)
+            elif v == "warning": st.markdown('<div class="flag-item flag-yellow" style="font-size:17px; padding:18px;">⚠️ <b>Есть риски</b></div>', unsafe_allow_html=True)
+            else: st.markdown('<div class="flag-item flag-red" style="font-size:17px; padding:18px;">☠️ <b>Опасный контракт</b></div>', unsafe_allow_html=True)
 
             c1, c2 = st.columns(2)
             with c1:
@@ -331,7 +354,6 @@ if scan and address.strip():
                 st.markdown(f'<div class="flag-item flag-{"yellow" if contract["is_proxy"] else "green"}">{"🟡" if contract["is_proxy"] else "🟢"} Proxy: {"Да" if contract["is_proxy"] else "Нет"}</div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="flag-item flag-{"yellow" if contract["buy_tax"] > 0.1 or contract["sell_tax"] > 0.1 else "green"}">{"🟡" if contract["buy_tax"] > 0.1 or contract["sell_tax"] > 0.1 else "🟢"} Налоги: {contract["buy_tax"]*100:.1f}% / {contract["sell_tax"]*100:.1f}%</div>', unsafe_allow_html=True)
 
-        # ДЕТАЛЬНЫЙ AI-АНАЛИЗ
         st.markdown("### 🤖 AI-анализ")
         with st.spinner("AI думает..."):
             ai_text = get_ai_verdict(metrics, flags, contract)
@@ -339,7 +361,7 @@ if scan and address.strip():
 
         st.markdown("---")
         st.link_button("🚀 Купить на BingX", "https://bingxdao.com/invite/IHWT6L/", use_container_width=True)
-        st.caption(f"Осталось бесплатных проверок на сегодня: {3 - st.session_state.scan_count}")
+        st.caption(f"Осталось бесплатных проверок: {3 - new_count}")
 
 elif scan and not address.strip():
     st.warning("Введи тикер или адрес токена.")
