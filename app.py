@@ -33,28 +33,60 @@ def get_ai_verdict(metrics: dict, flags: list, contract: dict = None) -> str:
     if not YANDEX_API_KEY or not YANDEX_FOLDER_ID:
         return "⚠️ AI-анализ не настроен."
     
-    verdict_ru = metrics.get("Вердикт", "не определён")
+    verdict_map = {
+        "gem": "ГЕМ (молодой, недооценённый, с потенциалом)",
+        "young": "МОЛОДОЙ (свежий токен, высокий риск)",
+        "established": "УСТОЯВШИЙСЯ (известный, безопасный, без потенциала иксов)",
+        "risk": "РИСК (есть тревожные сигналы)",
+        "scam": "СКАМ (красные флаги, не входить)",
+    }
+    verdict_ru = verdict_map.get(metrics.get("Вердикт", ""), "не определён")
     flags_text = "\n".join([f"— {text}" for level, text in flags])
     
     contract_text = ""
     if contract and "error" not in contract:
         c_v = contract.get("verdict", "")
-        contract_text = f"Контракт: {c_v}. Honeypot: {contract.get('is_honeypot')}, Mint: {contract.get('is_mintable')}"
+        c_map = {"safe": "безопасный", "warning": "есть риски", "danger": "ОПАСНЫЙ"}
+        contract_text = f"""
+ПРОВЕРКА КОНТРАКТА (GoPlus):
+Вердикт: {c_map.get(c_v, c_v)}
+Honeypot: {"Да" if contract.get("is_honeypot") else "Нет"}
+Mint: {"Есть — можно печатать токены" if contract.get("is_mintable") else "Отключён"}
+Blacklist: {"Есть" if contract.get("is_blacklisted") else "Нет"}
+Скрытый владелец: {"Да" if contract.get("hidden_owner") else "Нет"}
+"""
 
-    prompt_text = f"""Ты — AI-аналитик. Напиши краткий вердикт (2-3 предложения).
-    Вердикт сканера: {verdict_ru}
-    Сеть: {metrics.get('Сеть')}, Пара: {metrics.get('Пара')}
-    Ликвидность: {metrics.get('Ликвидность')}, Объём 24ч: {metrics.get('Объём 24ч')}
-    Флаги: {flags_text}
-    {contract_text}
-    Пиши только на русском, без воды."""
-    
+    prompt_text = f"""Ты — AI-аналитик мемкоинов. Проанализируй готовый отчёт сканера и напиши краткий вердикт на русском языке.
+
+ОТЧЁТ СКАНЕРА:
+Вердикт: {verdict_ru}
+Сеть: {metrics.get('Сеть', 'N/A')}
+Пара: {metrics.get('Пара', 'N/A')}
+Ликвидность: {metrics.get('Ликвидность', 'N/A')}
+Объём 24ч: {metrics.get('Объём 24ч', 'N/A')}
+FDV: {metrics.get('FDV', 'N/A')}
+Изменение 24ч: {metrics.get('Δ 24ч', 'N/A')}
+Покупки: {metrics.get('Покупки', 'N/A')} / Продажи: {metrics.get('Продажи', 'N/A')}
+
+АНАЛИЗ СКАНЕРА:
+{flags_text}
+{contract_text}
+
+ПРАВИЛА:
+1. Пиши ТОЛЬКО на русском языке.
+2. Опирайся ТОЛЬКО на строки из отчёта выше. Не выдумывай.
+3. Если вердикт РИСК или СКАМ — прямо предупреди: «не входи», «высокий риск».
+4. Если вердикт ГЕМ — укажи потенциал и напомни о рисках.
+5. Пиши 2-3 предложения. Без вступлений вроде «Данный токен представляет собой».
+
+Твой вердикт:"""
+
     url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
     headers = {"Content-Type": "application/json", "Authorization": f"Api-Key {YANDEX_API_KEY}"}
     body = {
         "modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt-lite",
-        "completionOptions": {"stream": False, "temperature": 0.2, "maxTokens": "300"},
-        "messages": [{"role": "user", "text": prompt_text}]
+        "completionOptions": {"stream": False, "temperature": 0.2, "maxTokens": "400"},
+        "messages": [{"role": "system", "text": "Ты — опытный криптоаналитик."}, {"role": "user", "text": prompt_text}]
     }
     try:
         r = requests.post(url, headers=headers, json=body, timeout=30)
@@ -65,6 +97,7 @@ def get_ai_verdict(metrics: dict, flags: list, contract: dict = None) -> str:
 
 # ---------- GOPLUS ----------
 CHAIN_MAP = {"SOLANA": "solana", "ETHEREUM": "1", "BSC": "56", "BASE": "8453"}
+
 @st.cache_data(ttl=3300)
 def get_goplus_token(key, secret):
     if not key: return ""
@@ -97,29 +130,43 @@ def check_contract(address: str, chain: str) -> dict:
 
         is_honeypot = res.get("is_honeypot") == "1"
         is_mintable = res.get("is_mintable") == "1"
+        is_blacklisted = res.get("is_blacklisted") == "1"
+        hidden_owner = res.get("hidden_owner") == "1"
+        is_open_source = res.get("is_open_source") == "1"
+        is_proxy = res.get("is_proxy") == "1"
+        buy_tax = float(res.get("buy_tax", 0) or 0)
+        sell_tax = float(res.get("sell_tax", 0) or 0)
+
+        dangers = []
+        if is_honeypot: dangers.append("honeypot")
+        if hidden_owner: dangers.append("hidden_owner")
         
-        dangers = ["honeypot"] if is_honeypot else []
-        warnings = ["mint"] if is_mintable else []
+        warnings = []
+        if is_mintable: warnings.append("mint")
+        if is_blacklisted: warnings.append("blacklist")
+        if is_proxy: warnings.append("proxy")
+        if buy_tax > 0.1 or sell_tax > 0.1: warnings.append("tax")
+
         verdict = "danger" if dangers else ("warning" if warnings else "safe")
         
-        return {"verdict": verdict, "is_honeypot": is_honeypot, "is_mintable": is_mintable, "is_open_source": res.get("is_open_source") == "1", "is_proxy": res.get("is_proxy") == "1", "is_blacklisted": res.get("is_blacklisted") == "1", "buy_tax": float(res.get("buy_tax", 0) or 0), "sell_tax": float(res.get("sell_tax", 0) or 0)}
+        return {
+            "verdict": verdict, "is_honeypot": is_honeypot, "is_mintable": is_mintable,
+            "is_open_source": is_open_source, "is_proxy": is_proxy, "is_blacklisted": is_blacklisted,
+            "hidden_owner": hidden_owner, "buy_tax": buy_tax, "sell_tax": sell_tax
+        }
     except: return {"error": "Ошибка проверки"}
 
-# ---------- DEXSCREENER (Поиск по адресу или тикеру) ----------
+# ---------- DEXSCREENER ----------
 @st.cache_data(ttl=60)
 def fetch_token_data(query: str):
     query = query.strip()
     try:
-        # Если это короткий запрос (тикер), ищем через search API
         if len(query) < 30 and not query.startswith("0x"):
             search_res = requests.get(f"https://api.dexscreener.com/latest/dex/search?q={query}", timeout=10).json()
             if search_res.get("pairs"):
-                # Берем самый ликвидный
                 best_pair = sorted(search_res["pairs"], key=lambda p: (p.get("liquidity") or {}).get("usd", 0) or 0, reverse=True)[0]
-                address = best_pair.get("baseToken", {}).get("address")
-                query = address # Теперь ищем по точному адресу
+                query = best_pair.get("baseToken", {}).get("address")
 
-        # Основной запрос по адресу
         url = f"https://api.dexscreener.com/latest/dex/tokens/{query}"
         r = requests.get(url, timeout=15)
         return r.json()
@@ -131,15 +178,13 @@ def fetch_token_data(query: str):
 def fetch_trending():
     try:
         r = requests.get("https://api.geckoterminal.com/api/v2/networks/solana/trending_pools?page=1", timeout=10)
-        pools = r.json().get("data", [])[:4] # Берем 4 штуки
+        pools = r.json().get("data", [])[:4]
         result = []
         for p in pools:
             attr = p.get("attributes", {})
-            name = attr.get("name", "")
             base_token_id = p.get("relationships", {}).get("base_token", {}).get("data", {}).get("id")
             if base_token_id:
-                addr = base_token_id.split("_")[-1]
-                result.append({"name": name, "address": addr})
+                result.append({"name": attr.get("name", ""), "address": base_token_id.split("_")[-1]})
         return result
     except: return []
 
@@ -210,9 +255,9 @@ st.markdown("""
     .verdict-risk { background: rgba(245,158,11,0.1); border-color: #f59e0b; }
     .verdict-scam { background: rgba(239,68,68,0.1); border-color: #ef4444; }
     .verdict-title { font-size: 42px; font-weight: 800; margin: 10px 0; }
-    .metric-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 15px; text-align: center; }
+    .metric-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 15px; text-align: center; margin-bottom: 10px; }
     .flag-item { background: rgba(255,255,255,0.03); border-left: 3px solid #6b7280; padding: 12px; border-radius: 8px; margin-bottom: 8px; color: #e5e7eb; }
-    .flag-red { border-left-color: #ef4444; } .flag-yellow { border-left-color: #f59e0b; } .flag-green { border-left-color: #10b981; }
+    .flag-red { border-left-color: #ef4444; background: rgba(239,68,68,0.08); } .flag-yellow { border-left-color: #f59e0b; background: rgba(245,158,11,0.08); } .flag-green { border-left-color: #10b981; background: rgba(16,185,129,0.08); }
     .ai-block { background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.4); border-radius: 16px; padding: 20px; margin: 20px 0; }
 </style>
 """, unsafe_allow_html=True)
@@ -227,10 +272,9 @@ if trending:
     for i, t in enumerate(trending):
         with cols[i]:
             if st.button(f"{t['name']}", use_container_width=True):
-                st.session_state.scan_address = t['address'] # Записываем в сессию
+                st.session_state.scan_address = t['address']
                 st.rerun()
 
-# Поле ввода
 default_addr = st.session_state.get('scan_address', '')
 address = st.text_input("", value=default_addr, placeholder="📍 Вставь адрес (0x...) или тикер (BONK, PEPE)...", label_visibility="collapsed")
 
@@ -242,7 +286,7 @@ with col2:
 if scan and address.strip():
     if st.session_state.scan_count >= 3:
         st.error("🛑 Вы исчерпали лимит бесплатных проверок на сегодня (3/3).")
-        st.info("Оформите подписку VK Donut за 300₽/мес для безлимитного доступа или зарегистрируйтесь на бирже партнера.")
+        st.info("Оформите подписку VK Donut за 300₽/мес для безлимитного доступа.")
         st.link_button("💎 Оформить подписку", "https://vk.com/donut/club224917928")
         st.stop()
     
@@ -254,20 +298,17 @@ if scan and address.strip():
     elif not data.get("pairs"):
         st.warning("Токен не найден. Проверь тикер или адрес.")
     else:
-        st.session_state.scan_count += 1 # Увеличиваем счетчик
+        st.session_state.scan_count += 1
         pairs = sorted(data["pairs"], key=lambda p: (p.get("liquidity") or {}).get("usd", 0) or 0, reverse=True)
         pair = pairs[0]
         
-        # ИЗОБРАЖЕНИЕ ТОКЕНА
         image_url = pair.get("info", {}).get("imageUrl")
         token_symbol = pair.get("baseToken", {}).get("symbol", "Токен")
         
         c1, c2 = st.columns([1, 4])
         with c1:
-            if image_url:
-                st.image(image_url, width=100)
-            else:
-                st.markdown("### 🪙")
+            if image_url: st.image(image_url, width=100)
+            else: st.markdown("### 🪙")
         with c2:
             st.markdown(f"## {token_symbol}")
 
@@ -294,14 +335,32 @@ if scan and address.strip():
         st.markdown("### 🚩 Анализ")
         for level, text in flags: st.markdown(f'<div class="flag-item flag-{level}">{text}</div>', unsafe_allow_html=True)
 
-        # Контракт и AI
-        st.markdown("### 🛡️ Контракт")
+        # ДЕТАЛЬНАЯ ПРОВЕРКА КОНТРАКТА
+        st.markdown("### 🛡️ Проверка контракта")
         contract = check_contract(pair.get("baseToken", {}).get("address", address), metrics["Сеть"])
-        if "error" in contract: st.warning(contract["error"])
-        else:
-            if contract["verdict"] == "safe": st.success("✅ Контракт безопасный")
-            else: st.warning("⚠️ Есть риски в контракте")
         
+        if "error" in contract: 
+            st.warning(contract["error"])
+        else:
+            v = contract["verdict"]
+            if v == "safe":
+                st.markdown('<div class="flag-item flag-green" style="font-size:17px; padding:18px;">✅ <b>Контракт безопасный</b> — опасных функций не найдено</div>', unsafe_allow_html=True)
+            elif v == "warning":
+                st.markdown('<div class="flag-item flag-yellow" style="font-size:17px; padding:18px;">⚠️ <b>Есть риски</b> — проверь детали ниже</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="flag-item flag-red" style="font-size:17px; padding:18px;">☠️ <b>Опасный контракт</b> — не входи</div>', unsafe_allow_html=True)
+
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown(f'<div class="flag-item flag-{"red" if contract["is_honeypot"] else "green"}">{"🔴" if contract["is_honeypot"] else "🟢"} Honeypot: {"Да" if contract["is_honeypot"] else "Нет"}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="flag-item flag-{"yellow" if contract["is_mintable"] else "green"}">{"🟡" if contract["is_mintable"] else "🟢"} Mint: {"Есть" if contract["is_mintable"] else "Отключён"}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="flag-item flag-{"yellow" if contract["is_blacklisted"] else "green"}">{"🟡" if contract["is_blacklisted"] else "🟢"} Blacklist: {"Есть" if contract["is_blacklisted"] else "Нет"}</div>', unsafe_allow_html=True)
+            with c2:
+                st.markdown(f'<div class="flag-item flag-{"green" if contract["is_open_source"] else "yellow"}">{"🟢" if contract["is_open_source"] else "🟡"} Open source: {"Да" if contract["is_open_source"] else "Нет"}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="flag-item flag-{"yellow" if contract["is_proxy"] else "green"}">{"🟡" if contract["is_proxy"] else "🟢"} Proxy: {"Да" if contract["is_proxy"] else "Нет"}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="flag-item flag-{"yellow" if contract["buy_tax"] > 0.1 or contract["sell_tax"] > 0.1 else "green"}">{"🟡" if contract["buy_tax"] > 0.1 or contract["sell_tax"] > 0.1 else "🟢"} Налоги: {contract["buy_tax"]*100:.1f}% / {contract["sell_tax"]*100:.1f}%</div>', unsafe_allow_html=True)
+
+        # ДЕТАЛЬНЫЙ AI-АНАЛИЗ
         st.markdown("### 🤖 AI-анализ")
         with st.spinner("AI думает..."):
             ai_text = get_ai_verdict(metrics, flags, contract)
