@@ -173,18 +173,26 @@ def fetch_token_data(query: str):
     except Exception as e:
         return {"error": str(e)}
 
-# ---------- ТРЕНДОВЫЕ ТОКЕНЫ ----------
+# ---------- ТРЕНДОВЫЕ ТОКЕНЫ (ТОП ПО ОБЪЕМУ) ----------
 @st.cache_data(ttl=300)
 def fetch_trending():
     try:
-        r = requests.get("https://api.geckoterminal.com/api/v2/networks/solana/trending_pools?page=1", timeout=10)
-        pools = r.json().get("data", [])[:4]
+        # Берем не trending, а топ по объему торгов (там крупные, безопасные токены)
+        url = "https://api.geckoterminal.com/api/v2/networks/solana/pools?page=1&sort=h24_volume_usd_desc"
+        r = requests.get(url, timeout=10)
+        pools = r.json().get("data", [])[:4] # Берем 4 штуки
+        
         result = []
         for p in pools:
             attr = p.get("attributes", {})
+            name = attr.get("name", "")
+            # Берем только те, где ликвидность больше $100k (чтобы отсечь мусор)
+            liq = float(attr.get("reserve_in_usd", 0) or 0)
+            if liq < 100000: continue
+            
             base_token_id = p.get("relationships", {}).get("base_token", {}).get("data", {}).get("id")
             if base_token_id:
-                result.append({"name": attr.get("name", ""), "address": base_token_id.split("_")[-1]})
+                result.append({"name": name, "address": base_token_id.split("_")[-1]})
         return result
     except: return []
 
