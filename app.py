@@ -25,10 +25,8 @@ except Exception:
     GOPLUS_APP_SECRET = ""
 
 # ---------- СЧЕТЧИК ПРОВЕРОК (ЧЕРЕЗ URL) ----------
-# Инициализация счетчика в URL, если его нет
 if "scan_count" not in st.query_params:
     st.query_params["scan_count"] = "0"
-
 scan_count = int(st.query_params["scan_count"])
 
 # ---------- YANDEXGPT ----------
@@ -183,46 +181,33 @@ def analyze(pair: dict):
     }
     return verdict, flags, gem_points, metrics
 
-# ---------- ДИНАМИЧЕСКИЕ ТРЕНДОВЫЕ ТОКЕНЫ ----------
+# ---------- ТРЕНДОВЫЕ ТОКЕНЫ (С ФИЛЬТРОМ ДУБЛИКАТОВ) ----------
 @st.cache_data(ttl=600)
 def fetch_trending():
     try:
-        # Берем топ-15 пулов по объему на Solana
         r = requests.get("https://api.geckoterminal.com/api/v2/networks/solana/pools?page=1&sort=h24_volume_usd_desc", timeout=10)
-        pools = r.json().get("data", [])[:15]
+        pools = r.json().get("data", [])[:30] # Берем больше пулов на проверку
         
         good_tokens = []
+        seen_names = set() # Отсекаем дубликаты по имени
+        
         for p in pools:
             attr = p.get("attributes", {})
             liq = float(attr.get("reserve_in_usd", 0) or 0)
-            if liq < 100000: continue # Отсекаем мелочь
+            if liq < 500000: continue # Только крупные токены
             
             base_token_id = p.get("relationships", {}).get("base_token", {}).get("data", {}).get("id")
             if not base_token_id: continue
             
             addr = base_token_id.split("_")[-1]
+            symbol = attr.get("name", "").split("/")[0].strip() # Берем только тикер (до слэша)
             
-            # Прогоняем через наш анализатор, чтобы отсеять "Риск" и "Скам"
-            # Нам нужны только "Устоявшиеся" или "Гемы"
-            # (Создаем фейковый pair для analyze, чтобы не делать лишних запросов)
-            fake_pair = {
-                "liquidity": {"usd": liq},
-                "volume": {"h24": float(attr.get("volume_usd", {}).get("h24", 0) or 0)},
-                "fdv": float(attr.get("fdv_usd", 0) or 0),
-                "pairCreatedAt": 0, # Не знаем точную дату, пропустим проверку возраста
-                "txns": {"h24": {"buys": 0, "sells": 0}},
-                "priceChange": {"h24": 0},
-                "baseToken": {"symbol": attr.get("name", "").split("/")[0].strip(), "address": addr},
-                "quoteToken": {"symbol": "USDC"},
-                "chainId": "solana",
-                "dexId": "raydium"
-            }
-            
-            # Упрощенная проверка: нам нужно, чтобы токен был старым (иначе он не попадет в топ по объему)
-            # Но так как мы берем топ по объему, там в основном старые токены.
-            # Мы просто берем те, у которых ликвидность > $500k (это точно не скам)
-            if liq > 500000:
-                good_tokens.append({"name": attr.get("name", "").split("/")[0].strip(), "address": addr})
+            # Если мы уже добавили этот токен, пропускаем
+            if symbol in seen_names:
+                continue
+                
+            seen_names.add(symbol)
+            good_tokens.append({"name": symbol, "address": addr})
                 
             if len(good_tokens) >= 4:
                 break
@@ -231,13 +216,6 @@ def fetch_trending():
     except Exception as e:
         print(e)
         return []
-
-def display_verdict_card(verdict):
-    if verdict == "gem": st.markdown('<div class="verdict-card verdict-gem"><div class="verdict-title" style="color:#6ee7b7">💎 ГЕМ</div></div>', unsafe_allow_html=True)
-    elif verdict == "young": st.markdown('<div class="verdict-card verdict-young"><div class="verdict-title" style="color:#f9a8d4">🌱 МОЛОДОЙ</div></div>', unsafe_allow_html=True)
-    elif verdict == "established": st.markdown('<div class="verdict-card verdict-established"><div class="verdict-title" style="color:#93c5fd">🏛️ УСТОЯВШИЙСЯ</div></div>', unsafe_allow_html=True)
-    elif verdict == "risk": st.markdown('<div class="verdict-card verdict-risk"><div class="verdict-title" style="color:#fcd34d">⚠️ РИСК</div></div>', unsafe_allow_html=True)
-    else: st.markdown('<div class="verdict-card verdict-scam"><div class="verdict-title" style="color:#fca5a5">☠️ СКАМ</div></div>', unsafe_allow_html=True)
 
 # ---------- СТИЛИ (CSS) ----------
 st.markdown("""
@@ -267,11 +245,12 @@ st.markdown('<div class="hero"><div class="hero-title">🔮 KRYPTOMANTIX</div><d
 # ---------- UI: ВЫБОР ТРЕНДОВЫХ ТОКЕНОВ ----------
 trending = fetch_trending()
 if trending:
-    st.markdown("#### 🔥 Популярные токены (с хорошими метриками)")
+    st.markdown("#### 🔥 Популярные токены")
     cols = st.columns(len(trending))
     for i, t in enumerate(trending):
         with cols[i]:
-            if st.button(f"{t['name']}", use_container_width=True):
+            # ДОБАВЛЕН key=f"trend_btn_{i}" для уникальности
+            if st.button(f"{t['name']}", key=f"trend_btn_{i}", use_container_width=True):
                 st.session_state.scan_address = t['address']
                 st.rerun()
 
@@ -301,7 +280,6 @@ if scan and address.strip():
     elif not data.get("pairs"):
         st.warning("Токен не найден. Проверь тикер или адрес.")
     else:
-        # Увеличиваем счетчик в URL (сохраняется при перезагрузке)
         new_count = scan_count + 1
         st.query_params["scan_count"] = str(new_count)
         
@@ -319,9 +297,13 @@ if scan and address.strip():
             st.markdown(f"## {token_symbol}")
 
         verdict, flags, gem_points, metrics = analyze(pair)
-        display_verdict_card(verdict)
 
-        # Кнопка поделиться
+        if verdict == "gem": st.markdown('<div class="verdict-card verdict-gem"><div class="verdict-title" style="color:#6ee7b7">💎 ГЕМ</div></div>', unsafe_allow_html=True)
+        elif verdict == "young": st.markdown('<div class="verdict-card verdict-young"><div class="verdict-title" style="color:#f9a8d4">🌱 МОЛОДОЙ</div></div>', unsafe_allow_html=True)
+        elif verdict == "established": st.markdown('<div class="verdict-card verdict-established"><div class="verdict-title" style="color:#93c5fd">🏛️ УСТОЯВШИЙСЯ</div></div>', unsafe_allow_html=True)
+        elif verdict == "risk": st.markdown('<div class="verdict-card verdict-risk"><div class="verdict-title" style="color:#fcd34d">⚠️ РИСК</div></div>', unsafe_allow_html=True)
+        else: st.markdown('<div class="verdict-card verdict-scam"><div class="verdict-title" style="color:#fca5a5">☠️ СКАМ</div></div>', unsafe_allow_html=True)
+
         share_txt = urllib.parse.quote(f"Проверил {token_symbol} в KRYPTOMANTIX. Вердикт: {verdict.upper()}!")
         st.markdown(f'<a href="https://vk.com/share.php?url=https://kryptomantix.streamlit.app&title={share_txt}" target="_blank" style="display:block; text-align:center; padding:10px; background:rgba(255,255,255,0.1); border-radius:8px; color:white; text-decoration:none; margin-bottom:20px;">🚀 Поделиться в ВК</a>', unsafe_allow_html=True)
 
