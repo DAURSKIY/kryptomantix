@@ -291,7 +291,7 @@ with col2:
 if scan and address.strip():
     if st.session_state.scan_count >= 3:
         st.error("🛑 Вы исчерпали лимит бесплатных проверок на сегодня (3/3).")
-        st.info("Оформите подписку VK Donut за 300₽/мес для безлимитного доступа.")
+        st.info("Оформите подписку VK Donut за 100₽/мес для безлимитного доступа.")
         st.link_button("💎 Оформить подписку", "https://vk.com/donut/club224917928")
         st.stop()
     
