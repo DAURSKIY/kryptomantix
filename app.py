@@ -211,10 +211,33 @@ st.markdown("""
     .flag-item { background: rgba(255,255,255,0.03); border-left: 3px solid #6b7280; padding: 12px; border-radius: 8px; margin-bottom: 8px; color: #e5e7eb; }
     .flag-red { border-left-color: #ef4444; background: rgba(239,68,68,0.08); } .flag-yellow { border-left-color: #f59e0b; background: rgba(245,158,11,0.08); } .flag-green { border-left-color: #10b981; background: rgba(16,185,129,0.08); }
     .ai-block { background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.4); border-radius: 16px; padding: 20px; margin: 20px 0; }
+        .hero-sub-badge {
+        display: inline-block;
+        background: linear-gradient(90deg, rgba(168, 85, 247, 0.1), rgba(236, 72, 153, 0.1));
+        border: 1px solid rgba(168, 85, 247, 0.3);
+        border-radius: 50px;
+        padding: 10px 24px;
+        margin-top: 15px;
+        font-size: 16px;
+        font-weight: 600;
+        color: #e5e7eb;
+        letter-spacing: 0.5px;
+        box-shadow: 0 0 20px rgba(168, 85, 247, 0.15);
+    }
+    .hero-sub-badge span {
+        color: #d8b4fe;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="hero"><div class="hero-title">🔮 KRYPTOMANTIX</div><div class="hero-sub">AI-оракул для крипты. Вставь адрес или тикер токена.</div></div>', unsafe_allow_html=True)
+st.markdown("""
+<div class="hero">
+    <div class="hero-title">🔮 KRYPTOMANTIX</div>
+    <div class="hero-sub-badge">
+        <span>AI-инструменты</span> для анализа и поиска криптовалют
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 # ---------- UI: ВЫБОР ТРЕНДОВЫХ ТОКЕНОВ ----------
 trending = fetch_trending()
