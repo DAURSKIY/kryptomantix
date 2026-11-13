@@ -318,11 +318,17 @@ if scan and address.strip():
             st.warning(contract["error"])
         else:
             v = contract["verdict"]
-            if v == "safe": st.markdown('<div class="flag-item flag-green" style="font-size:17px; padding:18px;">✅ <b>Контракт безопасный</b></div>', unsafe_allow_html=True)
-            elif v == "warning": st.markdown('<div class="flag-item flag-yellow" style="font-size:17px; padding:18px;">⚠️ <b>Есть риски</b></div>', unsafe_allow_html=True)
-            else: st.markdown('<div class="flag-item flag-red" style="font-size:17px; padding:18px;">☠️ <b>Опасный контракт</b></div>', unsafe_allow_html=True)
-
-            c1, c2 = st.columns(2)
+              # НОВАЯ ЛОГИКА: Если вердикт плохой, но код чистый — меняем текст
+            if v == "safe":
+                if verdict in ["scam", "risk"]:
+                    st.markdown('<div class="flag-item flag-yellow" style="font-size:17px; padding:18px;">✅ <b>Код контракта чистый</b> (но рыночные метрики опасны)</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div class="flag-item flag-green" style="font-size:17px; padding:18px;">✅ <b>Контракт безопасный</b></div>', unsafe_allow_html=True)
+            elif v == "warning": 
+                st.markdown('<div class="flag-item flag-yellow" style="font-size:17px; padding:18px;">⚠️ <b>Есть риски в коде</b></div>', unsafe_allow_html=True)
+            else: 
+                st.markdown('<div class="flag-item flag-red" style="font-size:17px; padding:18px;">☠️ <b>Опасный контракт</b></div>', unsafe_allow_html=True)
+       c1, c2 = st.columns(2)
             with c1:
                 st.markdown(f'<div class="flag-item flag-{"red" if contract["is_honeypot"] else "green"}">{"🔴" if contract["is_honeypot"] else "🟢"} Honeypot: {"Да" if contract["is_honeypot"] else "Нет"}</div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="flag-item flag-{"yellow" if contract["is_mintable"] else "green"}">{"🟡" if contract["is_mintable"] else "🟢"} Mint: {"Есть" if contract["is_mintable"] else "Отключён"}</div>', unsafe_allow_html=True)
