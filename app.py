@@ -311,14 +311,15 @@ if scan and address.strip():
         st.markdown("### 🚩 Анализ")
         for level, text in flags: st.markdown(f'<div class="flag-item flag-{level}">{text}</div>', unsafe_allow_html=True)
 
-        st.markdown("### 🛡️ Проверка контракта")
+            st.markdown("### 🛡️ Проверка контракта")
         contract = check_contract(pair.get("baseToken", {}).get("address", address), metrics["Сеть"])
         
         if "error" in contract: 
             st.warning(contract["error"])
         else:
             v = contract["verdict"]
-              # НОВАЯ ЛОГИКА: Если вердикт плохой, но код чистый — меняем текст
+            
+            # НОВАЯ ЛОГИКА: Если вердикт плохой, но код чистый — меняем текст
             if v == "safe":
                 if verdict in ["scam", "risk"]:
                     st.markdown('<div class="flag-item flag-yellow" style="font-size:17px; padding:18px;">✅ <b>Код контракта чистый</b> (но рыночные метрики опасны)</div>', unsafe_allow_html=True)
@@ -328,8 +329,8 @@ if scan and address.strip():
                 st.markdown('<div class="flag-item flag-yellow" style="font-size:17px; padding:18px;">⚠️ <b>Есть риски в коде</b></div>', unsafe_allow_html=True)
             else: 
                 st.markdown('<div class="flag-item flag-red" style="font-size:17px; padding:18px;">☠️ <b>Опасный контракт</b></div>', unsafe_allow_html=True)
-     
-    c1, c2 = st.columns(2)
+
+            c1, c2 = st.columns(2)
             with c1:
                 st.markdown(f'<div class="flag-item flag-{"red" if contract["is_honeypot"] else "green"}">{"🔴" if contract["is_honeypot"] else "🟢"} Honeypot: {"Да" if contract["is_honeypot"] else "Нет"}</div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="flag-item flag-{"yellow" if contract["is_mintable"] else "green"}">{"🟡" if contract["is_mintable"] else "🟢"} Mint: {"Есть" if contract["is_mintable"] else "Отключён"}</div>', unsafe_allow_html=True)
@@ -343,10 +344,5 @@ if scan and address.strip():
         with st.spinner("AI думает..."):
             ai_text = get_ai_verdict(metrics, flags, contract)
         st.markdown(f'<div class="ai-block">{ai_text}</div>', unsafe_allow_html=True)
-
-        st.markdown("---")
-        st.link_button("🚀 Купить на BingX", "https://bingxdao.com/invite/IHWT6L/", use_container_width=True)
-        st.caption(f"Осталось бесплатных проверок: {3 - new_count}")
-
-elif scan and not address.strip():
-    st.warning("Введи тикер или адрес токена.")
+    
+    
