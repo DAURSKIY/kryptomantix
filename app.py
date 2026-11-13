@@ -282,15 +282,27 @@ if scan and address.strip():
         pairs = sorted(data["pairs"], key=lambda p: (p.get("liquidity") or {}).get("usd", 0) or 0, reverse=True)
         pair = pairs[0]
         
-        image_url = pair.get("info", {}).get("imageUrl")
+                image_url = pair.get("info", {}).get("imageUrl")
         token_symbol = pair.get("baseToken", {}).get("symbol", "Токен")
         
-        c1, c2 = st.columns([1, 4])
+        # Если ссылка начинается с //, добавляем https:
+        if image_url and image_url.startswith("//"):
+            image_url = "https:" + image_url
+
+        c1, c2 = st.columns([1, 5]) # Чуть изменил пропорции для красоты
         with c1:
-            if image_url: st.image(image_url, width=100)
-            else: st.markdown("### 🪙")
+            if image_url:
+                try:
+                    st.image(image_url, width=90)
+                except:
+                    # Если картинка битая, ставим стильную заглушку
+                    st.markdown('<div style="width: 90px; height: 90px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 40px;">🪙</div>', unsafe_allow_html=True)
+            else:
+                # Стильная заглушка, если картинки нет вообще
+                st.markdown('<div style="width: 90px; height: 90px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 40px;">🪙</div>', unsafe_allow_html=True)
         with c2:
-            st.markdown(f"## {token_symbol}")
+            # Добавил вертикальный отступ, чтобы текст красиво смотрелся рядом с кругом
+            st.markdown(f"<div style='margin-top: 15px;'><h2 style='margin:0;'>{token_symbol}</h2></div>", unsafe_allow_html=True)
 
         verdict, flags, gem_points, metrics = analyze(pair)
 
