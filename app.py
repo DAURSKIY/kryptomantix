@@ -282,7 +282,7 @@ if scan and address.strip():
         pairs = sorted(data["pairs"], key=lambda p: (p.get("liquidity") or {}).get("usd", 0) or 0, reverse=True)
         pair = pairs[0]
         
-                image_url = pair.get("info", {}).get("imageUrl")
+        image_url = pair.get("info", {}).get("imageUrl")
         token_symbol = pair.get("baseToken", {}).get("symbol", "Токен")
         
         # Если ссылка начинается с //, добавляем https:
