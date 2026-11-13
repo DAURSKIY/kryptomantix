@@ -311,7 +311,7 @@ if scan and address.strip():
         st.markdown("### 🚩 Анализ")
         for level, text in flags: st.markdown(f'<div class="flag-item flag-{level}">{text}</div>', unsafe_allow_html=True)
 
-            st.markdown("### 🛡️ Проверка контракта")
+        st.markdown("### 🛡️ Проверка контракта")
         contract = check_contract(pair.get("baseToken", {}).get("address", address), metrics["Сеть"])
         
         if "error" in contract: 
